@@ -46,9 +46,19 @@ model Brand {
 
   published Boolean  @default(false)
 
+  /// State licence number, displayed on customer-facing pages where the
+  /// market requires it. Placeholder in demo tenants.
+  licenseNumber String?
+
   products  Product[]
   retailers BrandRetailer[]
   rules     ComplianceRule[]
+  staff     StaffUser[]
+  customers Customer[]
+  segments  AlertSegment[]
+  alerts    Alert[]
+  specials  Special[]
+  events    MenuEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -294,4 +304,196 @@ model RetailerListing {
 
   @@unique([retailerId, productId])
   @@index([productId, observedAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// MISSION CONTROL — operators, audit, customers, alerts, specials
+// ─────────────────────────────────────────────────────────────
+
+/// Staff member with access to a brand's Mission Control.
+model StaffUser {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  email     String
+  name      String?
+  role      StaffRole @default(VIEWER)
+  active    Boolean  @default(true)
+  lastSeenAt DateTime?
+
+  auditEvents AuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandId, email])
+  @@index([brandId, active])
+}
+
+enum StaffRole {
+  OWNER      // full access incl. billing + staff
+  MANAGER    // inventory, specials, alerts
+  BUDTENDER  // inventory read + stock toggles
+  VIEWER     // read only
+}
+
+/// Append-only record of who changed what. Never updated or deleted —
+/// an audit log you can edit isn't an audit log.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  brandId     String
+  actorId     String?
+  actor       StaffUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  action      String   // "product.updated", "alert.sent"
+  entityType  String?  // "Product", "Coupon"
+  entityId    String?
+  summary     String   // human-readable, shown in the log
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+
+  @@index([brandId, createdAt])
+}
+
+/// A customer who opted in to alerts.
+///
+/// CONSENT IS MODELLED EXPLICITLY. SMS marketing consent is legally
+/// meaningful (TCPA) — we record when, how, and from where it was given,
+/// and keep the row after revocation so the record survives.
+model Customer {
+  id            String   @id @default(cuid())
+  brandId       String
+  brand         Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  email         String?
+  phone         String?
+
+  /// Separate consent per channel — opting into email is not opting into SMS.
+  emailOptIn    Boolean  @default(false)
+  smsOptIn      Boolean  @default(false)
+  pushOptIn     Boolean  @default(false)
+
+  consentAt     DateTime?
+  /// Where consent was captured: "menu_footer", "qr_landing", "in_store".
+  consentSource String?
+  consentIp     String?
+  revokedAt     DateTime?
+
+  tags          String[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([brandId, revokedAt])
+}
+
+/// A saved audience filter, e.g. "SMS opt-ins tagged concentrates".
+model AlertSegment {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  name        String
+  channel     AlertChannel
+  /// Structured filter evaluated against Customer rows.
+  filter      Json?
+
+  alerts      Alert[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([brandId])
+}
+
+enum AlertChannel {
+  PUSH
+  EMAIL
+  SMS
+}
+
+/// A drafted or sent alert. Owner approval is required before send —
+/// status must pass through APPROVED, never DRAFT straight to SENT.
+model Alert {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  segmentId   String?
+  segment     AlertSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+
+  title       String
+  body        String   @db.Text
+  channel     AlertChannel
+  status      AlertStatus @default(DRAFT)
+
+  scheduledFor DateTime?
+  sentAt       DateTime?
+  recipientCount Int?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([brandId, status])
+}
+
+enum AlertStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  CANCELLED
+}
+
+/// A promotion. Discount rules vary by state — some markets restrict or
+/// ban cannabis discounting outright, so this carries its own state scope.
+model Special {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  name        String
+  code        String?
+  description String?  @db.Text
+
+  discountType  DiscountType @default(PERCENT)
+  discountValue Decimal      @db.Decimal(10, 2)
+
+  startsAt    DateTime?
+  endsAt      DateTime?
+  active      Boolean  @default(false)
+
+  /// Empty = applies brand-wide.
+  stateCodes  String[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([brandId, code])
+  @@index([brandId, active])
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+  BOGO
+}
+
+/// Rollup of menu activity. Written by the public menu, read by
+/// Mission Control analytics cards.
+model MenuEvent {
+  id         String   @id @default(cuid())
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  eventType  String   // "menu_view", "category_click", "coa_click"
+  productId  String?
+  category   String?
+  /// Short code from a QR or share link, so sharing is measurable.
+  refCode    String?
+
+  createdAt  DateTime @default(now())
+
+  @@index([brandId, eventType, createdAt])
 }
