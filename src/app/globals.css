@@ -39,3 +39,15 @@ body {
 }
 .input::placeholder { color: rgb(82 82 91); }
 .input:focus { border-color: rgb(255 255 255 / 0.25); }
+
+/* Mascot drift — separate layer from the mark, so it moves on its own. */
+@keyframes hsm-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-14px) rotate(2deg); }
+}
+.hsm-float { animation: hsm-float 7s ease-in-out infinite; }
+
+/* Slow drift is pleasant for most and genuinely unpleasant for some. */
+@media (prefers-reduced-motion: reduce) {
+  .hsm-float { animation: none; }
+}

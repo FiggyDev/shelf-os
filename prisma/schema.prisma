@@ -28,8 +28,15 @@ model Brand {
   tagline   String?
   about     String?  @db.Text
 
+  /// Primary mark shown in-app and on the public hero.
   logoUrl   String?
   heroUrl   String?
+  /// Optional art that floats over the mark on the hero (e.g. a mascot).
+  /// Kept separate from logoUrl so it can animate independently.
+  overlayUrl String?
+  /// Image used for link/social previews. Usually the "full" lockup —
+  /// mark and mascot combined — since previews are a single flat image.
+  shareImageUrl String?
   /// Hex, drives the public theme so each deploy looks like the client.
   brandColor String? @default("#111111")
 
