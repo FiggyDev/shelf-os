@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { logout } from "@/app/login/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,15 @@ export default async function MissionControlLayout({
             >
               View public menu →
             </Link>
+
+            <form action={logout}>
+              <button
+                type="submit"
+                className="mt-2 w-full rounded-lg px-3 py-2 text-center text-xs text-zinc-600 transition hover:text-zinc-300"
+              >
+                Sign out
+              </button>
+            </form>
           </div>
         </aside>
 

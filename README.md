@@ -89,7 +89,7 @@ Brand ─┬─ Product ── ProductVariant ── Batch ── LabResult
 
 ## Stack
 
-Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 ·
+Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 ·
 Prisma 7 · PostgreSQL 17
 
 ---
@@ -101,7 +101,7 @@ Requires Node 20+, pnpm, and Docker.
 ```bash
 pnpm install
 docker compose up -d                    # Postgres on :55440
-cp .env.example .env
+cp .env.example .env                    # set MC_PASSWORD before /mc/* opens
 pnpm prisma migrate dev
 pnpm prisma generate
 pnpm tsx prisma/seed.ts                 # demo brand + catalog
@@ -149,9 +149,14 @@ Working today — 12 routes, all rendering against real data:
 - [x] Staff and roles
 - [x] Audit log — append-only
 - [x] Branding — asset slots on a transparency checkerboard
+- [x] Shared-password gate over all of `/mc/*` (signed httpOnly cookie,
+      12h expiry, fails closed when `MC_PASSWORD` is unset)
 
 **Not built yet**
-- [ ] Authentication (Mission Control is currently unguarded)
+- [ ] **Per-user login.** The gate is one shared password. Audit events
+      are attributed to a `StaffUser`, and with a shared password that
+      attribution is an assumption, not a fact. This must be replaced
+      with per-user sign-in before a brand puts a second person in here.
 - [ ] Automated retailer listing ingestion — listings are entered by hand
 - [ ] Compliance checker reading `ComplianceRule`
 - [ ] Actual alert delivery (SMS/email providers are not wired)
