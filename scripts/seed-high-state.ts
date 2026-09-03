@@ -93,9 +93,76 @@ async function main() {
     }
   }
 
+  // Retailers and listings.
+  //
+  // Names are fictional. This is a public repository and naming real
+  // dispensaries would imply a stocking relationship that doesn't exist.
+  //
+  // Ages are chosen to exercise every branch of the shelf-presence
+  // logic: fresh (<7d), aging, stale (>21d), and one product a store
+  // carries the brand but has never listed, which must surface as
+  // "missing" rather than simply being absent from the table.
+  const daysAgo = (n: number) =>
+    new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+  // priceOffset drives the price-mismatch column. Expected price is the
+  // median observed price across stores, so a symmetric spread around 0
+  // makes the middle store the baseline and flags the other two.
+  const STORES = [
+    { name: "Genesee Provisions", city: "Rochester", age: 2, priceOffset: 0 },
+    { name: "Park Ave Cannabis Co.", city: "Rochester", age: 12, priceOffset: 5 },
+    { name: "Lakeside Dispensary", city: "Irondequoit", age: 34, priceOffset: -3 },
+    { name: "Highland Green", city: "Rochester", age: null, priceOffset: 0 }, // carries, lists nothing
+  ];
+
+  const products = await prisma.product.findMany({
+    where: { brandId: brand.id },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
+
+  for (const s of STORES) {
+    const retailer = await prisma.retailer.upsert({
+      where: { id: `hsm-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}` },
+      update: {},
+      create: {
+        id: `hsm-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`,
+        name: s.name,
+        city: s.city,
+        stateCode: "NY",
+      },
+    });
+
+    await prisma.brandRetailer.upsert({
+      where: { brandId_retailerId: { brandId: brand.id, retailerId: retailer.id } },
+      update: {},
+      create: { brandId: brand.id, retailerId: retailer.id, active: true },
+    });
+
+    if (s.age === null) continue; // deliberately unlisted
+
+    for (const [i, product] of products.entries()) {
+      const price = 40 + i * 5 + s.priceOffset;
+      await prisma.retailerListing.upsert({
+        where: { retailerId_productId: { retailerId: retailer.id, productId: product.id } },
+        update: { observedAt: daysAgo(s.age), listedPrice: price },
+        create: {
+          retailerId: retailer.id,
+          productId: product.id,
+          observedAt: daysAgo(s.age),
+          listedPrice: price,
+          inStock: true,
+          source: "manual",
+        },
+      });
+    }
+  }
+
   console.log("High State of Mind:", {
     products: await prisma.product.count({ where: { brandId: brand.id } }),
     variants: await prisma.productVariant.count({ where: { product: { brandId: brand.id } } }),
+    retailers: await prisma.brandRetailer.count({ where: { brandId: brand.id } }),
+    listings: await prisma.retailerListing.count({ where: { product: { brandId: brand.id } } }),
   });
 }
 

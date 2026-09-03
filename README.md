@@ -15,6 +15,28 @@ rather than quarters.
 
 ---
 
+## What it looks like
+
+**Public menu** — brand-themed, age-gated, per-batch COA links.
+
+![Public menu](docs/screenshots/public-menu.jpg)
+
+**Shelf presence** — every store × every product, worst first. A product a
+store carries but has never listed shows as *Not listed* rather than being
+absent from the table, which is the case that actually costs a brand money.
+The delta column compares each store's price against the median observed
+across stores.
+
+![Shelf presence](docs/screenshots/shelf-presence.jpg)
+
+**Share & QR** — a code per print placement, each tagging its own `?ref`,
+so a brand that cannot buy ads can still tell which physical placement
+worked.
+
+![Share and QR codes](docs/screenshots/share-qr.jpg)
+
+---
+
 ## Why it's built this way
 
 **Nothing in the data model is cannabis-specific.** A `Brand` carries a
@@ -86,7 +108,18 @@ pnpm tsx prisma/seed.ts                 # demo brand + catalog
 pnpm dev
 ```
 
-Then open **http://localhost:3000/b/north-shore**
+Then open **http://localhost:3000/b/north-shore**, or run
+
+```bash
+pnpm tsx scripts/seed-high-state.ts    # second tenant, with retailers
+```
+
+for a fuller tenant at **/b/high-state** and **/mc/high-state** — five
+products across four retailers, seeded to exercise every shelf-presence
+state (current, aging, stale, and carried-but-never-listed) and a price
+spread that triggers the mismatch flag.
+
+Retailer names in both seeds are fictional.
 
 The seed creates a fictional brand with three products, four batches with
 current COAs, and three retailers — one deliberately seeded with a 45-day
@@ -96,16 +129,32 @@ stale listing so the staleness logic has something to show.
 
 ## Status
 
-Early. Working today:
+Working today — 12 routes, all rendering against real data:
 
-- [x] Multi-tenant brand model, themed per brand
+**Public**
+- [x] Brand-themed menu: categories, variants, potency, per-batch COA links
 - [x] Age gate (self-attestation, session-scoped, no tracking)
-- [x] Public menu — categories, variants, potency, per-batch COA links
 - [x] Where-to-buy locator
-- [ ] Admin UI for catalog management
-- [ ] Listing staleness dashboard
-- [ ] Compliance checker over `ComplianceRule`
-- [ ] Retailer listing ingestion
+- [x] Link previews with per-tenant share images
+
+**Mission Control** (`/mc/[slug]`)
+- [x] Overview
+- [x] Shelf presence — freshness + price-delta across retailers
+- [x] Inventory editing (server actions, transactional audit)
+- [x] Chat menu import — paste a messy inventory message, preview, confirm
+- [x] Alert Bay — segments and sends, gated behind approval
+- [x] Customers — per-channel consent with source and timestamp
+- [x] Specials — state-scoped promotions
+- [x] Share & QR — per-placement codes with scan attribution
+- [x] Staff and roles
+- [x] Audit log — append-only
+- [x] Branding — asset slots on a transparency checkerboard
+
+**Not built yet**
+- [ ] Authentication (Mission Control is currently unguarded)
+- [ ] Automated retailer listing ingestion — listings are entered by hand
+- [ ] Compliance checker reading `ComplianceRule`
+- [ ] Actual alert delivery (SMS/email providers are not wired)
 
 ---
 
