@@ -1,36 +1,128 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Shelf OS
 
-## Getting Started
+Compliant product presence for regulated brands that can't advertise.
 
-First, run the development server:
+Cannabis, hemp, and nicotine brands are banned from Google and Meta ads,
+dropped by most payment processors, and largely ignored by mainstream
+SaaS. They still need somewhere to publish accurate product information,
+prove lab results, and tell a customer where to actually buy the thing.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Shelf OS is that surface. **It deliberately does not sell anything** — no
+cart, no checkout, no payment rails. Skipping transactions avoids payment
+processing, seed-to-sale integration, and the compliance weight that comes
+with commerce, which is what makes it deployable for a brand in weeks
+rather than quarters.
+
+---
+
+## Why it's built this way
+
+**Nothing in the data model is cannabis-specific.** A `Brand` carries a
+`vertical` (cannabis, hemp, nicotine, other) and its own `minimumAge`.
+Vertical behaviour lives in configuration, not in the schema, so the same
+codebase serves a hemp beverage brand or a nicotine brand without a fork.
+
+**COA links must never break.** `Batch` and `LabResult` are additive. When
+a new certificate supersedes an old one the previous row is retained and
+only `isCurrent` moves. The QR code is already printed on packaging
+sitting on a shelf somewhere — a dead link on a compliance document is a
+real problem, not a cosmetic one.
+
+**Regulations are data, not code.** `ComplianceRule` stores state
+requirements versioned by `effectiveFrom` / `effectiveTo`, so a label or
+filing can be evaluated against the rules in force at a point in time
+rather than only against today's. Rules carry a `citationUrl` back to the
+regulator.
+
+**Listing staleness is a first-class signal.** `RetailerListing.observedAt`
+records when a listing was last confirmed. Brands currently answer *"which
+of the stores carrying us have our current price and COA live?"* by
+checking dispensary menus by hand, store by store, or not at all. The data
+to answer it automatically is modelled here.
+
+---
+
+## Data model
+
+```
+Brand ─┬─ Product ── ProductVariant ── Batch ── LabResult
+       │                                          (COA, additive)
+       ├─ BrandRetailer ── Retailer ── RetailerListing
+       │                                 (observedAt -> staleness)
+       └─ ComplianceRule
+            (rules-as-data, versioned by effective date)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Model | Purpose |
+|---|---|
+| `Brand` | Tenant. Every query is scoped by `brandId` |
+| `Product` / `ProductVariant` | Catalog. Potency lives on the variant — a 1g and a 3.5g differ |
+| `Batch` | Manufactured lot. What a package QR resolves to |
+| `LabResult` | COA. Additive so superseded certificates keep resolving |
+| `ComplianceRule` | State requirements as versioned data |
+| `Retailer` / `BrandRetailer` | Where the brand is stocked |
+| `RetailerListing` | A product seen at a store, with a last-observed timestamp |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Stack
 
-## Learn More
+Next.js 15 (App Router) · TypeScript · Tailwind CSS 4 ·
+Prisma 7 · PostgreSQL 17
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Running locally
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Requires Node 20+, pnpm, and Docker.
 
-## Deploy on Vercel
+```bash
+pnpm install
+docker compose up -d                    # Postgres on :55440
+cp .env.example .env
+pnpm prisma migrate dev
+pnpm prisma generate
+pnpm tsx prisma/seed.ts                 # demo brand + catalog
+pnpm dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Then open **http://localhost:3000/b/north-shore**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The seed creates a fictional brand with three products, four batches with
+current COAs, and three retailers — one deliberately seeded with a 45-day
+stale listing so the staleness logic has something to show.
+
+---
+
+## Status
+
+Early. Working today:
+
+- [x] Multi-tenant brand model, themed per brand
+- [x] Age gate (self-attestation, session-scoped, no tracking)
+- [x] Public menu — categories, variants, potency, per-batch COA links
+- [x] Where-to-buy locator
+- [ ] Admin UI for catalog management
+- [ ] Listing staleness dashboard
+- [ ] Compliance checker over `ComplianceRule`
+- [ ] Retailer listing ingestion
+
+---
+
+## A note on the age gate
+
+The gate is **self-attestation**, the common standard for informational
+brand sites. It is not identity verification — that's a separate
+requirement that applies to transactions, and this project doesn't
+transact. The visitor's answer is stored in `sessionStorage` only: nothing
+is sent to the server and no identifier is created.
+
+**Nothing in this repository is legal advice.** Cannabis and nicotine
+marketing rules vary by state and change often. Any brand deploying this
+should have its own counsel confirm what applies to it.
+
+---
+
+## License
+
+MIT

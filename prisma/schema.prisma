@@ -1,0 +1,297 @@
+// Shelf OS — compliant product presence for regulated brands.
+//
+// DESIGN NOTE: nothing in this schema is cannabis-specific by name.
+// A "Brand" could be a cannabis producer, a vape/nicotine brand, or any
+// regulated CPG that cannot advertise on mainstream platforms and must
+// publish compliant product information plus a where-to-buy path.
+// Vertical-specific behaviour lives in configuration, not in the models.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// TENANCY
+// ─────────────────────────────────────────────────────────────
+
+/// A brand is the tenant. Every query must be scoped by brandId.
+model Brand {
+  id        String   @id @default(cuid())
+  /// URL segment: /b/{slug}. Also usable as a subdomain.
+  slug      String   @unique
+  name      String
+  tagline   String?
+  about     String?  @db.Text
+
+  logoUrl   String?
+  heroUrl   String?
+  /// Hex, drives the public theme so each deploy looks like the client.
+  brandColor String? @default("#111111")
+
+  websiteUrl String?
+  contactEmail String?
+
+  /// Which regulated vertical this brand operates in. Drives which
+  /// compliance rules and disclaimers apply.
+  vertical  Vertical @default(CANNABIS)
+
+  /// Minimum age for the age gate. 21 in most US cannabis markets,
+  /// varies for nicotine by state.
+  minimumAge Int     @default(21)
+
+  published Boolean  @default(false)
+
+  products  Product[]
+  retailers BrandRetailer[]
+  rules     ComplianceRule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([published])
+}
+
+enum Vertical {
+  CANNABIS
+  HEMP
+  NICOTINE
+  OTHER
+}
+
+// ─────────────────────────────────────────────────────────────
+// CATALOG
+// ─────────────────────────────────────────────────────────────
+
+model Product {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  slug        String
+  name        String
+  description String?  @db.Text
+  category    String?
+  strainType  StrainType?
+
+  imageUrl    String?
+
+  /// Display order on the public menu. Lower sorts first.
+  sortOrder   Int      @default(0)
+  published   Boolean  @default(false)
+
+  variants    ProductVariant[]
+  listings    RetailerListing[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([brandId, slug])
+  @@index([brandId, published])
+}
+
+enum StrainType {
+  INDICA
+  SATIVA
+  HYBRID
+  NOT_APPLICABLE
+}
+
+/// A sellable size/format of a product. Potency lives here, not on
+/// Product, because a 1g and a 3.5g of the same flower differ.
+model ProductVariant {
+  id         String  @id @default(cuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// "3.5g", "1g cart", "10mg x 10"
+  size       String
+  sku        String?
+
+  /// Stored as percentages for inhalables, mg for edibles. unit says which.
+  thc        Decimal? @db.Decimal(7, 3)
+  cbd        Decimal? @db.Decimal(7, 3)
+  potencyUnit PotencyUnit @default(PERCENT)
+
+  batches    Batch[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([productId])
+}
+
+enum PotencyUnit {
+  PERCENT
+  MG
+  MG_PER_SERVING
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPLIANCE — the defensible part
+// ─────────────────────────────────────────────────────────────
+
+/// A manufactured lot. The QR code on packaging resolves to a Batch,
+/// which is why superseded COAs must never break the link.
+model Batch {
+  id            String   @id @default(cuid())
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  /// Printed on the package. Unique per variant.
+  batchCode     String
+  packagedOn    DateTime?
+  expiresOn     DateTime?
+
+  /// Where this lot is legally sold. Drives which state rules apply.
+  stateCodes    String[]
+
+  labResults    LabResult[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([variantId, batchCode])
+  @@index([batchCode])
+}
+
+/// A COA. Superseding is additive — old rows are retained so an old QR
+/// still resolves, but only one row per batch is current.
+model LabResult {
+  id          String   @id @default(cuid())
+  batchId     String
+  batch       Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  labName     String?
+  testedOn    DateTime?
+  /// Hosted PDF. Never link directly to a lab portal — those rot.
+  fileUrl     String
+  /// Only one current result per batch; enforced in application logic.
+  isCurrent   Boolean  @default(true)
+
+  thc         Decimal? @db.Decimal(7, 3)
+  cbd         Decimal? @db.Decimal(7, 3)
+  /// Pass/fail summary for pesticides, metals, microbials.
+  passedScreening Boolean?
+
+  createdAt   DateTime @default(now())
+
+  @@index([batchId, isCurrent])
+}
+
+/// Rules-as-data. State requirements are versioned by effective date so
+/// a filing or label check can be evaluated against the rules that were
+/// in force at a point in time, not just today's.
+model ComplianceRule {
+  id            String   @id @default(cuid())
+  brandId       String?
+  brand         Brand?   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  /// Null brandId = a global rule applying to every brand in the vertical.
+  vertical      Vertical
+  stateCode     String
+
+  ruleType      RuleType
+  /// Human-readable requirement, quoted from the regulator where possible.
+  requirement   String   @db.Text
+  /// Structured payload the checker evaluates against.
+  parameters    Json?
+
+  citationUrl   String?
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([vertical, stateCode, effectiveFrom])
+}
+
+enum RuleType {
+  LABEL_WARNING
+  POTENCY_LIMIT
+  AGE_GATE
+  ADVERTISING
+  COA_DISPLAY
+  PACKAGING
+  REPORTING
+}
+
+// ─────────────────────────────────────────────────────────────
+// WHERE TO BUY
+// ─────────────────────────────────────────────────────────────
+
+/// A retail location. Shared across brands — two brands can both be
+/// carried by the same dispensary.
+model Retailer {
+  id         String  @id @default(cuid())
+  name       String
+  address1   String?
+  city       String?
+  stateCode  String?
+  postalCode String?
+
+  latitude   Float?
+  longitude  Float?
+
+  phone      String?
+  websiteUrl String?
+  /// Deep link to the retailer's own menu, where one exists.
+  menuUrl    String?
+
+  brands     BrandRetailer[]
+  listings   RetailerListing[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([stateCode, city])
+}
+
+/// Join: this brand is carried at this retailer.
+model BrandRetailer {
+  id         String   @id @default(cuid())
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  retailerId String
+  retailer   Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  verifiedOn DateTime?
+  active     Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+
+  @@unique([brandId, retailerId])
+  @@index([brandId, active])
+}
+
+/// A specific product seen at a specific retailer. This is the row that
+/// powers "which stores have our current price and COA live" — the
+/// staleness signal brands currently check by hand, store by store.
+model RetailerListing {
+  id          String   @id @default(cuid())
+  retailerId  String
+  retailer    Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  listedPrice Decimal? @db.Decimal(10, 2)
+  inStock     Boolean?
+
+  /// Where we observed this listing, e.g. "weedmaps", "dutchie", "manual".
+  source      String?
+  sourceUrl   String?
+  /// Last time we confirmed this listing. Age of this drives the
+  /// "stale listing" flag shown to the brand.
+  observedAt  DateTime @default(now())
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([retailerId, productId])
+  @@index([productId, observedAt])
+}
