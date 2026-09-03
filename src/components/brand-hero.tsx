@@ -60,7 +60,7 @@ export function BrandHero({
               alt={`${name} logo`}
               fill
               priority
-              sizes="(max-width: 640px) 14rem, 18rem"
+              sizes="(max-width: 640px) 224px, 288px"
               className="object-contain drop-shadow-[0_0_40px_rgba(157,255,60,0.18)]"
             />
 
@@ -72,7 +72,7 @@ export function BrandHero({
                   alt=""
                   fill
                   priority
-                  sizes="(max-width: 640px) 8rem, 11rem"
+                  sizes="(max-width: 640px) 128px, 176px"
                   className="object-contain drop-shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                 />
               </div>

@@ -49,7 +49,7 @@ export async function generateMetadata({
     `Product menu for ${brand.name}.`;
 
   return {
-    title: `${brand.name} — Menu`,
+    title: { absolute: `${brand.name} — Menu` },
     description,
     openGraph: {
       title: brand.name,
