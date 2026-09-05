@@ -180,3 +180,11 @@ should have its own counsel confirm what applies to it.
 ## License
 
 MIT
+
+## Local review checks
+
+`pnpm test` checks age confirmation/hydration and session verification. `pnpm lint` and `pnpm exec tsc --noEmit` check source.
+
+For the inventory integration check, use a disposable migrated `shelf_review` PostgreSQL database at `127.0.0.1:55443`, set `DATABASE_URL`, `MC_PASSWORD` and `MC_SESSION_SECRET` to local test configuration, and run `pnpm build` followed by `SHELF_REVIEW_DB=1 node tests/inventory-http.mjs`. It starts and stops a loopback server on port 3390, creates and removes prefixed fixtures, and briefly installs an audit-failure trigger only in that isolated database. Do not run concurrent instances.
+
+The shared-password pilot grants shared access; it does not authenticate a specific staff member or implement staff roles. Inventory actions verify the session again and record `authentication: shared_password` with no staff actor. Older inventory audit entries may contain automatically selected staff names and must not be treated as verified personal attribution. Per-user authentication and authorization remain required before multi-user operation.

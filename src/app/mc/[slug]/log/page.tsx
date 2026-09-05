@@ -43,8 +43,10 @@ export default async function AuditLogPage({
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Audit Log</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-          Append-only record of every change, who made it, and when. Entries
-          cannot be edited or deleted — a log you can rewrite isn&rsquo;t a log.
+          Recorded changes and their authentication context. Shared-password
+          sessions do not identify a person. Older inventory entries may name
+          a staff member who was selected automatically; those names are not
+          verified attribution. This interface does not edit or delete entries.
         </p>
       </header>
 
@@ -80,7 +82,9 @@ export default async function AuditLogPage({
                 </div>
                 <p className="mt-2 text-sm text-zinc-200">{e.summary}</p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {e.actor?.name ?? e.actor?.email ?? "System"} ·{" "}
+                  {e.metadata && typeof e.metadata === "object" && !Array.isArray(e.metadata) && e.metadata.authentication === "shared_password"
+                    ? "Shared-password session (person unidentified)"
+                    : e.actor?.name ?? e.actor?.email ?? "System"} ·{" "}
                   {e.createdAt.toLocaleString()}
                 </p>
               </div>

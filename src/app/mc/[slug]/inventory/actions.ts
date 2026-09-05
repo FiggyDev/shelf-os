@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { SESSION_COOKIE, tokenIsValid } from "@/lib/mc-auth";
 
 /**
  * Inventory mutations.
@@ -24,13 +26,9 @@ const ProductUpdate = z.object({
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
-/** The staff member acting. Real auth replaces this; the shape doesn't change. */
-async function currentActor(brandId: string) {
-  return prisma.staffUser.findFirst({
-    where: { brandId, active: true },
-    orderBy: { role: "asc" },
-    select: { id: true },
-  });
+/** The pilot session grants shared access, never a particular staff identity. */
+async function hasSession() {
+  return tokenIsValid((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
 function describeChanges(
@@ -59,6 +57,7 @@ export async function updateProduct(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
   const parsed = ProductUpdate.safeParse({
     productId: formData.get("productId"),
     brandSlug: formData.get("brandSlug"),
@@ -104,8 +103,6 @@ export async function updateProduct(
 
   if (changes.length === 0) return { ok: true };
 
-  const actor = await currentActor(existing.brand.id);
-
   await prisma.$transaction([
     prisma.product.update({
       where: { id: input.productId },
@@ -119,12 +116,12 @@ export async function updateProduct(
     prisma.auditEvent.create({
       data: {
         brandId: existing.brand.id,
-        actorId: actor?.id ?? null,
+        actorId: null,
         action: "product.updated",
         entityType: "Product",
         entityId: input.productId,
         summary: `${existing.name}: ${changes.join(", ")}`,
-        metadata: { changes },
+        metadata: { changes, authentication: "shared_password" },
       },
     }),
   ]);
@@ -140,6 +137,7 @@ export async function toggleProductPublished(
   brandSlug: string,
   productId: string,
 ): Promise<ActionResult> {
+  if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
   const existing = await prisma.product.findUnique({
     where: { id: productId },
     include: { brand: { select: { id: true, slug: true } } },
@@ -151,8 +149,6 @@ export async function toggleProductPublished(
   }
 
   const next = !existing.published;
-  const actor = await currentActor(existing.brand.id);
-
   await prisma.$transaction([
     prisma.product.update({
       where: { id: productId },
@@ -161,11 +157,12 @@ export async function toggleProductPublished(
     prisma.auditEvent.create({
       data: {
         brandId: existing.brand.id,
-        actorId: actor?.id ?? null,
+        actorId: null,
         action: next ? "product.published" : "product.hidden",
         entityType: "Product",
         entityId: productId,
         summary: `${existing.name} ${next ? "shown on" : "hidden from"} the public menu`,
+        metadata: { authentication: "shared_password" },
       },
     }),
   ]);
