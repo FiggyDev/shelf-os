@@ -48,5 +48,6 @@ jobs:
       - run: pnpm exec tsc --noEmit
       - run: pnpm test
       - run: pnpm build
+      - run: node --test tests/review-server.test.mjs
       - run: node tests/inventory-http.mjs
       - run: node tests/import-http.mjs
