@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { startReviewServer, stopReviewServer } from "./review-server.mjs";
 import { createHmac, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/client.js";
@@ -29,8 +29,7 @@ async function check(name, run) { await run(); checks.push({ name, passed:true }
  await client.connect();
  await client.query('INSERT INTO "Brand"(id,slug,name,"updatedAt") VALUES($1,$1,$2,NOW())',[brandId,"Import fixture brand"]);
  await client.query('INSERT INTO "Product"(id,"brandId",slug,name,published,"updatedAt") VALUES($1,$2,$1,$3,true,NOW())',[originalId,brandId,"Blue Dream"]);
- child=spawn(process.execPath,["node_modules/next/dist/bin/next","start","--hostname","127.0.0.1","--port","3391"],{stdio:"ignore"});
- let ready=false; for(let i=0;i<100;i++){try{await fetch(base+"/login");ready=true;break;}catch{await new Promise(resolve=>setTimeout(resolve,100));}} assert.ok(ready);
+ child=await startReviewServer(3391);
  await check("anonymous confirmation creates nothing",async()=>{
   assert.equal((await request(payload(),false)).status,307); assert.deepEqual(await counts(),{products:1,imports:0,audits:0});
  });
@@ -68,7 +67,7 @@ async function check(name, run) { await run(); checks.push({ name, passed:true }
  });
  console.log(JSON.stringify({checks},null,2));
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
- if(child&&child.exitCode===null){const exited=new Promise(resolve=>child.once("exit",resolve));child.kill("SIGTERM");await exited;}
+ await stopReviewServer(child);
  await client.query('DELETE FROM "AuditEvent" WHERE "brandId"=$1',[brandId]);
  await client.query('DELETE FROM "Brand" WHERE id=$1',[brandId]);await client.end();
 });

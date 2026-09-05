@@ -1,0 +1,52 @@
+name: Shelf review
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Components and built HTTP PostgreSQL regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: review
+          POSTGRES_PASSWORD: review_fixture_only
+          POSTGRES_DB: shelf_review
+        ports:
+          - 55443:5432
+        options: >-
+          --health-cmd "pg_isready -U review -d shelf_review"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable CI fixture only; integration guards pin host/port/database.
+      DATABASE_URL: postgresql://review:review_fixture_only@127.0.0.1:55443/shelf_review
+      SHELF_REVIEW_DB: '1'
+      MC_PASSWORD: CI-only-review-password
+      MC_SESSION_SECRET: ci-only-shelf-session-fixture-0000000000
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm test
+      - run: pnpm build
+      - run: node tests/inventory-http.mjs
+      - run: node tests/import-http.mjs

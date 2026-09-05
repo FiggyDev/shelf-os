@@ -2,7 +2,7 @@
 // Run after prisma migrate deploy and pnpm build, with SHELF_REVIEW_DB=1.
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { startReviewServer, stopReviewServer } from "./review-server.mjs";
 import { createHmac } from "node:crypto";
 import { Client } from "pg";
 import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/client.js";
@@ -41,10 +41,7 @@ async function check(name, run) { await run(); results.push({ name, passed: true
   await client.query('INSERT INTO "Brand"(id,slug,name,"updatedAt") VALUES($1,$1,$2,NOW())', [brandId, "Review HTTP Brand"]);
   await client.query('INSERT INTO "StaffUser"(id,"brandId",email,name,role,"updatedAt") VALUES($1,$2,$3,$4,$5,NOW())', [ownerId, brandId, "review@example.invalid", "Unrelated fixture owner", "OWNER"]);
   await client.query('INSERT INTO "Product"(id,"brandId",slug,name,"updatedAt") VALUES($1,$2,$1,$3,NOW())', [productId, brandId, "Original"]);
-  child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3390"], { stdio: "ignore" });
-  let ready = false;
-  for (let i=0; i<100; i++) { try { await fetch(base + "/login"); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); } }
-  assert.ok(ready, "local app started");
+  child = await startReviewServer(3390);
   for (const [label, session] of [["anonymous", ""], ["invalid cookie", "mc_session=invalid"], ["expired cookie", cookie(Date.now() - 1000)]]) {
     await check(label + " cannot mutate", async () => {
       assert.equal(await request("/mc/" + brandId + "/inventory", session, "Rejected edit"), 307);
@@ -90,10 +87,7 @@ async function check(name, run) { await run(); results.push({ name, passed: true
   });
   console.log(JSON.stringify({ checks: results }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  if (child && child.exitCode === null) {
-    const exited = new Promise(resolve => child.once("exit", resolve));
-    child.kill("SIGTERM"); await exited;
-  }
+  await stopReviewServer(child);
   await client.query('DELETE FROM "AuditEvent" WHERE "entityId"=$1', [productId]);
   await client.query('DELETE FROM "Brand" WHERE id=$1', [brandId]);
   await client.end();
