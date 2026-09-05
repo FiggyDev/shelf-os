@@ -46,9 +46,13 @@ export default async function SpecialsPage({
     orderBy: [{ active: "desc" }, { createdAt: "desc" }],
   });
 
+  // One request-time snapshot keeps counts and row badges consistent.
+  // This force-dynamic Server Component evaluates expiry for each request.
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
   const active = specials.filter((s) => s.active);
   const expired = specials.filter(
-    (s) => s.endsAt && s.endsAt.getTime() < Date.now(),
+    (s) => s.endsAt && s.endsAt.getTime() < now,
   );
 
   return (
@@ -86,7 +90,7 @@ export default async function SpecialsPage({
 
       <div className="space-y-3">
         {specials.map((s) => {
-          const isExpired = s.endsAt && s.endsAt.getTime() < Date.now();
+          const isExpired = s.endsAt && s.endsAt.getTime() < now;
           return (
             <div
               key={s.id}
