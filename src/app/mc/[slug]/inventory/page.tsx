@@ -40,6 +40,7 @@ export default async function InventoryPage({
     category: p.category,
     description: p.description,
     published: p.published,
+    importNotes: p.importNotes,
     variants: p.variants.map((v) => {
       const batch = v.batches[0];
       return {

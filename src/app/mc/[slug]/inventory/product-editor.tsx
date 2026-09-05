@@ -9,6 +9,7 @@ export interface EditableProduct {
   category: string | null;
   description: string | null;
   published: boolean;
+  importNotes: string | null;
   variants: {
     id: string;
     size: string;
@@ -108,6 +109,11 @@ export function ProductEditor({
             />
             Show on the public menu
           </label>
+
+          {product.importNotes && <details className="mt-4 rounded border border-white/10 p-3 text-sm text-zinc-400">
+            <summary>Imported source — verify before publishing</summary>
+            <p className="mt-2 whitespace-pre-wrap">{product.importNotes}</p>
+          </details>}
 
           {/* Variants are read-only here — potency and COAs are batch-level
               records, edited where the batch lives, not inline. */}
