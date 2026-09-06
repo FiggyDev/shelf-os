@@ -45,6 +45,7 @@ jobs:
       - run: pnpm exec prisma generate
       - run: pnpm exec prisma migrate deploy
       - run: pnpm lint
+      - run: pnpm exec next typegen
       - run: pnpm exec tsc --noEmit
       - run: pnpm test
       - run: pnpm build
