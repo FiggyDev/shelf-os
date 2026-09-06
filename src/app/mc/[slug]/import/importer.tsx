@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { parseChatMenu, type ParsedProduct } from "@/lib/chat-menu-parser";
+
+import type { MenuImportRequest, MenuImportResult } from "@/lib/menu-import";
 
 const SAMPLE = `🔥🔥 VERIFIED CHAT MENU 🔥🔥
 
@@ -25,7 +27,14 @@ EDIBLES 🍬
 
 const REVIEW_THRESHOLD = 0.5;
 
-export function ChatMenuImporter() {
+export function ChatMenuImporter({ brandSlug, importAction }: {
+  brandSlug: string;
+  importAction: (input: MenuImportRequest) => Promise<MenuImportResult>;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [status, setStatus] = useState<MenuImportResult | null>(null);
+  const request = useRef<{ fingerprint: string; id: string } | null>(null);
+  const inFlight = useRef(false);
   const [raw, setRaw] = useState("");
   const [excluded, setExcluded] = useState<Set<number>>(new Set());
 
@@ -42,6 +51,7 @@ export function ChatMenuImporter() {
   const needsReview = included.filter((p) => p.confidence < REVIEW_THRESHOLD);
 
   function toggle(lineNumber: number) {
+    setStatus(null);
     setExcluded((prev) => {
       const next = new Set(prev);
       if (next.has(lineNumber)) next.delete(lineNumber);
@@ -63,7 +73,9 @@ export function ChatMenuImporter() {
           </label>
           <button
             type="button"
+            disabled={pending}
             onClick={() => {
+              setStatus(null);
               setRaw(SAMPLE);
               setExcluded(new Set());
             }}
@@ -76,7 +88,10 @@ export function ChatMenuImporter() {
         <textarea
           id="raw-menu"
           value={raw}
+          disabled={pending}
+          maxLength={50000}
           onChange={(e) => {
+            setStatus(null);
             setRaw(e.target.value);
             setExcluded(new Set());
           }}
@@ -138,6 +153,7 @@ export function ChatMenuImporter() {
                     product={p}
                     excluded={excluded.has(p.lineNumber)}
                     onToggle={() => toggle(p.lineNumber)}
+                    disabled={pending}
                   />
                 ))}
               </tbody>
@@ -165,16 +181,32 @@ export function ChatMenuImporter() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              disabled={included.length === 0}
+              disabled={included.length === 0 || included.length > 200 || pending || status?.ok === true}
+              onClick={() => {
+                if (inFlight.current) return;
+                const lineNumbers = included.map(row => row.lineNumber);
+                const fingerprint = JSON.stringify([brandSlug, raw, lineNumbers]);
+                if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
+                const requestId = request.current.id;
+                inFlight.current = true;
+                startTransition(async () => {
+                  try { setStatus(await importAction({ brandSlug, raw, lineNumbers, requestId })); }
+                  catch { setStatus({ ok: false, error: "Import could not be confirmed. Retry this selection safely." }); }
+                  finally { inFlight.current = false; }
+                });
+              }}
               className="rounded-lg bg-emerald-400 px-5 py-2.5 text-sm font-semibold text-black transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Import {included.length} product
+              {pending ? "Importing" : "Import"} {included.length} product
               {included.length === 1 ? "" : "s"}
             </button>
             <span className="text-xs text-zinc-500">
-              Nothing is written until you confirm.
+              Creates new hidden drafts; existing products are not replaced. Prices and stock markers are retained as review notes. Limit: 200 products.
             </span>
           </div>
+          {status && <p role="status" className="text-sm text-zinc-200">
+            {status.ok ? <>Saved {status.count} draft{status.count === 1 ? "" : "s"}. <a className="underline" href={`/mc/${brandSlug}/inventory`}>Review in Inventory</a> before publishing.</> : status.error}
+          </p>}
         </>
       )}
     </div>
@@ -185,10 +217,12 @@ function Row({
   product,
   excluded,
   onToggle,
+  disabled,
 }: {
   product: ParsedProduct;
   excluded: boolean;
   onToggle: () => void;
+  disabled: boolean;
 }) {
   const low = product.confidence < REVIEW_THRESHOLD;
 
@@ -201,6 +235,7 @@ function Row({
         <input
           type="checkbox"
           checked={!excluded}
+          disabled={disabled}
           onChange={onToggle}
           aria-label={`Include ${product.name}`}
           className="h-4 w-4 accent-emerald-400"

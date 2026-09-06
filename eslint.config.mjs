@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Prisma owns these generated declarations and runtime files.
+    "src/generated/prisma/**",
   ]),
 ]);
 

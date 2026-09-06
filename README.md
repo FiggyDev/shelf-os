@@ -180,3 +180,15 @@ should have its own counsel confirm what applies to it.
 ## License
 
 MIT
+
+## Local review checks
+
+`pnpm test` checks age confirmation/hydration and session verification. `pnpm lint` and `pnpm exec tsc --noEmit` check source.
+
+For the inventory integration check, use a disposable migrated `shelf_review` PostgreSQL database at `127.0.0.1:55443`, set `DATABASE_URL`, `MC_PASSWORD` and `MC_SESSION_SECRET` to local test configuration, and run `pnpm build` followed by `SHELF_REVIEW_DB=1 node tests/inventory-http.mjs`. It starts and stops a loopback server on port 3390, creates and removes prefixed fixtures, and briefly installs an audit-failure trigger only in that isolated database. Do not run concurrent instances.
+
+The shared-password pilot grants shared access; it does not authenticate a specific staff member or implement staff roles. Inventory actions verify the session again and record `authentication: shared_password` with no staff actor. Older inventory audit entries may contain automatically selected staff names and must not be treated as verified personal attribution. Per-user authentication and authorization remain required before multi-user operation.
+
+Chat menu confirmation creates new hidden catalog drafts and never overwrites existing products. Selected source rows are reparsed on the server. Names, categories and strain types populate the catalog; recognized price units create draft variant sizes. Tier, original line, source prices, stock markers and parser confidence remain visible in Inventory as import notes, not verified live inventory, price or potency. Review product details and supporting batch/COA information before publishing.
+
+Migration `20260905060000_menu_import` and a regenerated Prisma client are required before deploying this import flow. A confirmation ID plus content hash makes same-selection retries idempotent; changing content under a completed ID is rejected. The importer accepts at most 50,000 characters and 200 selected products. Use `SHELF_REVIEW_DB=1 node tests/import-http.mjs` after the isolated database migration/build to validate actual HTTP persistence, concurrency and rollback. This harness owns loopback port 3391 and removes its fixture data/temporary audit trigger.
