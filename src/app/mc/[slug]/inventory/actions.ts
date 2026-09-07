@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { z } from "zod";
+import { inventoryRevision } from "@/lib/inventory-revision";
 import { prisma } from "@/lib/db";
 import { SESSION_COOKIE, tokenIsValid } from "@/lib/mc-auth";
 
@@ -17,6 +18,7 @@ import { SESSION_COOKIE, tokenIsValid } from "@/lib/mc-auth";
 
 const ProductUpdate = z.object({
   productId: z.string().min(1),
+  revision: z.string().regex(/^[a-f0-9]{64}$/, "Reload inventory before saving this form."),
   brandSlug: z.string().min(1),
   name: z.string().trim().min(1, "Name is required").max(120),
   category: z.string().trim().max(60).nullable(),
@@ -24,7 +26,7 @@ const ProductUpdate = z.object({
   published: z.boolean(),
 });
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+export type ActionResult = { ok: true; revision?: string } | { ok: false; error: string; conflict?: boolean; revision?: string };
 
 /** The pilot session grants shared access, never a particular staff identity. */
 async function hasSession() {
@@ -60,6 +62,7 @@ export async function updateProduct(
   if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
   const parsed = ProductUpdate.safeParse({
     productId: formData.get("productId"),
+    revision: formData.get("revision"),
     brandSlug: formData.get("brandSlug"),
     name: formData.get("name"),
     category: (formData.get("category") as string) || null,
@@ -108,7 +111,12 @@ export async function updateProduct(
       },
     );
 
-    if (changes.length === 0) return { ok: true };
+    const revision = inventoryRevision(existing);
+    // An identical retry is harmless, including after another editor saved it.
+    if (changes.length === 0) return { ok: true, revision };
+    if (input.revision !== revision) {
+      return { ok: false, conflict: true, error: "This product changed since you opened it. Copy your edits, then reload inventory to review the latest version." };
+    }
 
     await tx.product.update({
       where: { id: input.productId },
@@ -130,14 +138,14 @@ export async function updateProduct(
         metadata: { changes, authentication: "shared_password" },
       },
     });
-    return { ok: true };
+    return { ok: true, revision: inventoryRevision(input) };
   });
   if (!result.ok) return result;
 
   revalidatePath(`/mc/${input.brandSlug}/inventory`);
   revalidatePath(`/mc/${input.brandSlug}/log`);
   revalidatePath(`/b/${input.brandSlug}`);
-  return { ok: true };
+  return result;
 }
 
 /** Fast path for the visibility switch — same audit guarantee. */

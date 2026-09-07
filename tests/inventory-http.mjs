@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { startReviewServer, stopReviewServer } from "./review-server.mjs";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Client } from "pg";
 import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/client.js";
 const url = new URL(process.env.DATABASE_URL);
@@ -29,8 +29,10 @@ async function current() {
   return (await client.query('SELECT name FROM "Product" WHERE id=$1', [productId])).rows[0].name;
 }
 async function request(route, session, name, brandSlug = brandId) {
+  const row = (await client.query('SELECT name,category,description,published FROM "Product" WHERE id=$1', [productId])).rows[0];
+  const revision = createHash("sha256").update(JSON.stringify([row.name,row.category,row.description,row.published])).digest("hex");
   const form = new FormData();
-  for (const [key, value] of Object.entries({ productId, brandSlug, name, category: "Review", description: "Fixture", published: "on" })) form.set(key, value);
+  for (const [key, value] of Object.entries({ productId, brandSlug, revision, name, category: "Review", description: "Fixture", published: "on" })) form.set(key, value);
   const response = await fetch(base + route, { method: "POST", headers: { "Next-Action": action, Origin: base, ...(session ? { Cookie: session } : {}) }, body: await encodeReply([null, form]), redirect: "manual" });
   await response.text();
   return response.status;
