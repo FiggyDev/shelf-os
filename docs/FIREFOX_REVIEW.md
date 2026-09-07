@@ -1,0 +1,7 @@
+# Firefox acceptance review
+
+Extend the existing explicit browser selector to Firefox and run both import and inventory journeys over owned loopback HTTPS. Run the existing server-side inventory/import/race/stale tests on fresh PostgreSQL too. Register Firefox in CI. Keep production code unchanged; this covers browser engine acceptance, not real devices, deployment or durable import recovery after reload/tab close.
+
+Firefox151.0/Playwright1532 passes all6 import and7 inventory browser checks over HTTPS, with no page errors or blocked external requests. Real password login, server actions and owned PostgreSQL writes cover selection preservation, audit rollback, lost-response retry, repeated saves, stale edits, validation and390px layout/navigation. This is browser-engine evidence, not physical-device certification.
+
+All four existing HTTP/PostgreSQL runners pass, plus13 component/parser/auth tests, server-ownership check, type generation, TypeScript, lint and production build. Four migrations applied on owned PostgreSQL16. Matching Firefox installed; initial direct CLI path was absent under pnpm, corrected to the installed @playwright/test CLI. Chromium/WebKit prior acceptance remains historical and was not rerun in this pass. CI retains both engines and adds Firefox. Production source, authentication and cookie settings remain unchanged. All owned processes and fixture database are removed after validation. Reload/tab-close import confirmation recovery, staff/provider/publishing and deployment acceptance remain open.

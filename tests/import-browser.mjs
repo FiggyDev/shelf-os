@@ -1,11 +1,11 @@
 // Selected browser engine, production Next server/actions and an owned PostgreSQL fixture.
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { chromium, webkit, expect } from "@playwright/test";
+import { chromium, webkit, firefox, expect } from "@playwright/test";
 import { startHttpsReviewServer as startReviewServer, stopHttpsReviewServer as stopReviewServer } from "./review-https-server.mjs";
 const engine = process.env.SHELF_REVIEW_BROWSER ?? "chromium";
-assert(["chromium", "webkit"].includes(engine), "Unsupported review browser");
-const browserType = engine === "webkit" ? webkit : chromium;
+assert(["chromium", "webkit", "firefox"].includes(engine), "Unsupported review browser");
+const browserType = ({ chromium, webkit, firefox })[engine];
 const url = new URL(process.env.DATABASE_URL);
 assert.equal(process.env.SHELF_REVIEW_DB, "1");
 assert.equal(url.hostname, "127.0.0.1");
