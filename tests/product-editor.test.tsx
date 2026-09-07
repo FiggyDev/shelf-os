@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { ProductEditor, type EditableProduct } from "../src/app/mc/[slug]/inventory/product-editor";
+import type { EditableProduct } from "../src/app/mc/[slug]/inventory/product-editor";
 
 test("open editor retains baseline across refresh and validation errors, advances only on save", async () => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://review.invalid" });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, FormData: dom.window.FormData, IS_REACT_ACT_ENVIRONMENT: true });
+  const { createRoot } = await import("react-dom/client");
+  const { ProductEditor } = await import("../src/app/mc/[slug]/inventory/product-editor");
   const root = createRoot(document.getElementById("root")!);
   const product: EditableProduct = { id: "fixture", revision: "a".repeat(64), name: "Original", category: null, description: null, published: false, importNotes: null, variants: [] };
   const revisions: string[] = [];
@@ -23,7 +24,10 @@ test("open editor retains baseline across refresh and validation errors, advance
     await render({ ...product, revision: "b".repeat(64), name: "External edit" });
     assert.equal(revision(), "a".repeat(64));
     assert.equal(document.querySelector<HTMLInputElement>('input[name="name"]')!.value, "Original");
+    await act(async () => document.querySelector<HTMLInputElement>('input[name="published"]')!.click());
+    assert.equal(document.querySelector<HTMLInputElement>('input[name="published"]')!.checked, true);
     await act(async () => document.querySelector<HTMLFormElement>("form")!.requestSubmit());
+    assert.equal(document.querySelector<HTMLInputElement>('input[name="published"]')!.checked, true, "action reset must not restore old values under the new revision");
     assert.equal(revision(), "c".repeat(64));
     await act(async () => document.querySelector<HTMLFormElement>("form")!.requestSubmit());
     assert.equal(revision(), "c".repeat(64));
