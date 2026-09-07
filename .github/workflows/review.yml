@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review]
+    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review, codex/shelf-browser-review]
 permissions:
   contents: read
 jobs:
@@ -54,3 +54,5 @@ jobs:
       - run: node tests/import-http.mjs
       - run: node tests/inventory-race-http.mjs
       - run: node tests/inventory-stale-http.mjs
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: node tests/inventory-browser.mjs
