@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, codex/shelf-inventory-race-review]
+    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review]
 permissions:
   contents: read
 jobs:
@@ -53,3 +53,4 @@ jobs:
       - run: node tests/inventory-http.mjs
       - run: node tests/import-http.mjs
       - run: node tests/inventory-race-http.mjs
+      - run: node tests/inventory-stale-http.mjs

@@ -1,7 +1,7 @@
 // Two independent built-app requests, held at an owned PostgreSQL row lock.
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Client } from "pg";
 import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/client.js";
 import { startReviewServer, stopReviewServer } from "./review-server.mjs";
@@ -26,12 +26,15 @@ async function post(name, args) {
   await r.text();
   assert.equal(r.status, 200);
 }
+let revision;
 function edit(name) {
   const form = new FormData();
-  for (const [k,v] of Object.entries({ productId, brandSlug: brandId, name, category: "Review", description: "Fixture" })) form.set(k,v);
+  for (const [k,v] of Object.entries({ productId, brandSlug: brandId, revision, name, category: "Review", description: "Fixture" })) form.set(k,v);
   return post("updateProduct", [null, form]);
 }
 async function contend(calls) {
+  const row = (await client.query('SELECT name,category,description,published FROM "Product" WHERE id=$1', [productId])).rows[0];
+  revision = createHash("sha256").update(JSON.stringify([row.name,row.category,row.description,row.published])).digest("hex");
   await client.query("BEGIN");
   await client.query('SELECT id FROM "Product" WHERE id=$1 FOR UPDATE', [productId]);
   const responses = Promise.allSettled(calls.map(call => call()));
@@ -65,16 +68,13 @@ try {
   });
   await client.query('DELETE FROM "AuditEvent" WHERE "entityId"=$1', [productId]);
   await client.query('UPDATE "Product" SET published=false,name=$2 WHERE id=$1', [productId, "Original"]);
-  await check("concurrent edits audit the actual preceding value", async () => {
+  await check("distinct concurrent edits reject the stale writer and audit only the winner", async () => {
     await contend([() => edit("First"), () => edit("Second")]);
     const audits = (await client.query('SELECT metadata FROM "AuditEvent" WHERE "entityId"=$1', [productId])).rows;
-    assert.equal(audits.length, 2);
-    const names = audits.flatMap(a => a.metadata.changes.filter(c => c.startsWith("name ")));
-    assert.equal(names.filter(c => c.startsWith('name "Original"')).length, 1);
+    assert.equal(audits.length, 1);
     const final = (await client.query('SELECT name FROM "Product" WHERE id=$1', [productId])).rows[0].name;
-    const prior = final === "First" ? "Second" : "First";
-    assert.ok(names.includes(`name "Original" → "${prior}"`));
-    assert.ok(names.includes(`name "${prior}" → "${final}"`));
+    assert.ok(["First", "Second"].includes(final));
+    assert.ok(audits[0].metadata.changes.includes(`name "Original" → "${final}"`));
   });
   console.log(JSON.stringify({ checks }, null, 2));
   assert.ok(checks.every(c => c.passed), "inventory concurrency checks failed");

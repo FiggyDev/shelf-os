@@ -5,6 +5,7 @@ import { updateProduct, type ActionResult } from "./actions";
 
 export interface EditableProduct {
   id: string;
+  revision: string;
   name: string;
   category: string | null;
   description: string | null;
@@ -23,15 +24,14 @@ export interface EditableProduct {
 export function ProductEditor({
   product,
   brandSlug,
+  updateAction = updateProduct,
 }: {
   product: EditableProduct;
   brandSlug: string;
+  updateAction?: typeof updateProduct;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState<ActionResult | null, FormData>(
-    updateProduct,
-    null,
-  );
+
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03]">
@@ -56,15 +56,30 @@ export function ProductEditor({
             variant{product.variants.length === 1 ? "" : "s"}
           </span>
         </span>
-        {state?.ok && !open && (
-          <span className="text-xs text-emerald-400">Saved</span>
-        )}
         <span className="text-zinc-500">{open ? "−" : "+"}</span>
       </button>
 
-      {open && (
+      {open && <ProductForm product={product} brandSlug={brandSlug} updateAction={updateAction} />}
+    </div>
+  );
+}
+
+function ProductForm({ product: currentProduct, brandSlug, updateAction }: { product: EditableProduct; brandSlug: string; updateAction: typeof updateProduct }) {
+  // An open form retains its original fields and baseline across server refreshes.
+  // Closing and reopening starts a fresh form from the current server props.
+  const [product] = useState(currentProduct);
+  const [state, formAction, pending] = useActionState<ActionResult | null, FormData>(
+    async (previous, form) => {
+      const result = await updateAction(previous, form);
+      // Failed validation must keep the baseline that was actually submitted.
+      return { ...result, revision: result.ok ? result.revision : String(form.get("revision")) };
+    },
+    null,
+  );
+  return (
         <form action={formAction} className="border-t border-white/10 p-5">
           <input type="hidden" name="productId" value={product.id} />
+          <input type="hidden" name="revision" value={state?.revision ?? product.revision} />
           <input type="hidden" name="brandSlug" value={brandSlug} />
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -162,7 +177,10 @@ export function ProductEditor({
               {pending ? "Saving…" : "Save changes"}
             </button>
             {state && !state.ok && (
-              <span className="text-sm text-rose-400">{state.error}</span>
+              <span role="alert" className="text-sm text-rose-400">
+                {state.error}
+                {state.conflict && <button type="button" onClick={() => window.location.reload()} className="ml-2 underline">Reload inventory</button>}
+              </span>
             )}
             {state?.ok && (
               <span className="text-sm text-emerald-400">
@@ -171,8 +189,6 @@ export function ProductEditor({
             )}
           </div>
         </form>
-      )}
-    </div>
   );
 }
 
