@@ -75,36 +75,42 @@ export async function updateProduct(
   }
   const input = parsed.data;
 
-  const existing = await prisma.product.findUnique({
-    where: { id: input.productId },
-    include: { brand: { select: { id: true, slug: true } } },
-  });
+  const result = await prisma.$transaction<ActionResult>(async (tx) => {
+    // Lock before reading: audits describe the state this write replaces.
+    await tx.$queryRaw`
+      SELECT p.id FROM "Product" p JOIN "Brand" b ON b.id = p."brandId"
+      WHERE p.id = ${input.productId} AND b.slug = ${input.brandSlug}
+      FOR UPDATE OF p
+    `;
+    const existing = await tx.product.findUnique({
+      where: { id: input.productId },
+      include: { brand: { select: { id: true, slug: true } } },
+    });
 
-  if (!existing) return { ok: false, error: "Product not found" };
-  // Tenant check — never trust a product id from the client on its own.
-  if (existing.brand.slug !== input.brandSlug) {
-    return { ok: false, error: "Product does not belong to this brand" };
-  }
+    if (!existing) return { ok: false, error: "Product not found" };
+    // Tenant check — never trust a product id from the client on its own.
+    if (existing.brand.slug !== input.brandSlug) {
+      return { ok: false, error: "Product does not belong to this brand" };
+    }
 
-  const changes = describeChanges(
-    {
-      name: existing.name,
-      category: existing.category,
-      description: existing.description,
-      published: existing.published,
-    },
-    {
-      name: input.name,
-      category: input.category,
-      description: input.description,
-      published: input.published,
-    },
-  );
+    const changes = describeChanges(
+      {
+        name: existing.name,
+        category: existing.category,
+        description: existing.description,
+        published: existing.published,
+      },
+      {
+        name: input.name,
+        category: input.category,
+        description: input.description,
+        published: input.published,
+      },
+    );
 
-  if (changes.length === 0) return { ok: true };
+    if (changes.length === 0) return { ok: true };
 
-  await prisma.$transaction([
-    prisma.product.update({
+    await tx.product.update({
       where: { id: input.productId },
       data: {
         name: input.name,
@@ -112,8 +118,8 @@ export async function updateProduct(
         description: input.description,
         published: input.published,
       },
-    }),
-    prisma.auditEvent.create({
+    });
+    await tx.auditEvent.create({
       data: {
         brandId: existing.brand.id,
         actorId: null,
@@ -123,8 +129,10 @@ export async function updateProduct(
         summary: `${existing.name}: ${changes.join(", ")}`,
         metadata: { changes, authentication: "shared_password" },
       },
-    }),
-  ]);
+    });
+    return { ok: true };
+  });
+  if (!result.ok) return result;
 
   revalidatePath(`/mc/${input.brandSlug}/inventory`);
   revalidatePath(`/mc/${input.brandSlug}/log`);
@@ -138,23 +146,29 @@ export async function toggleProductPublished(
   productId: string,
 ): Promise<ActionResult> {
   if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
-  const existing = await prisma.product.findUnique({
-    where: { id: productId },
-    include: { brand: { select: { id: true, slug: true } } },
-  });
+  const result = await prisma.$transaction<ActionResult>(async (tx) => {
+    // Lock before reading: audits describe the state this write replaces.
+    await tx.$queryRaw`
+      SELECT p.id FROM "Product" p JOIN "Brand" b ON b.id = p."brandId"
+      WHERE p.id = ${productId} AND b.slug = ${brandSlug}
+      FOR UPDATE OF p
+    `;
+    const existing = await tx.product.findUnique({
+      where: { id: productId },
+      include: { brand: { select: { id: true, slug: true } } },
+    });
 
-  if (!existing) return { ok: false, error: "Product not found" };
-  if (existing.brand.slug !== brandSlug) {
-    return { ok: false, error: "Product does not belong to this brand" };
-  }
+    if (!existing) return { ok: false, error: "Product not found" };
+    if (existing.brand.slug !== brandSlug) {
+      return { ok: false, error: "Product does not belong to this brand" };
+    }
 
-  const next = !existing.published;
-  await prisma.$transaction([
-    prisma.product.update({
+    const next = !existing.published;
+    await tx.product.update({
       where: { id: productId },
       data: { published: next },
-    }),
-    prisma.auditEvent.create({
+    });
+    await tx.auditEvent.create({
       data: {
         brandId: existing.brand.id,
         actorId: null,
@@ -164,8 +178,10 @@ export async function toggleProductPublished(
         summary: `${existing.name} ${next ? "shown on" : "hidden from"} the public menu`,
         metadata: { authentication: "shared_password" },
       },
-    }),
-  ]);
+    });
+    return { ok: true };
+  });
+  if (!result.ok) return result;
 
   revalidatePath(`/mc/${brandSlug}/inventory`);
   revalidatePath(`/mc/${brandSlug}/log`);

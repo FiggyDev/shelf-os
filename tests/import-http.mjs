@@ -6,7 +6,7 @@ import { Client } from "pg";
 import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/client.js";
 const url = new URL(process.env.DATABASE_URL);
 assert.equal(process.env.SHELF_REVIEW_DB, "1");
-assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.port, "55443"); assert.equal(url.pathname, "/shelf_review");
+assert.equal(url.hostname, "127.0.0.1"); assert.equal(url.port, process.env.SHELF_REVIEW_DB_PORT ?? "55443"); assert.equal(url.pathname, "/shelf_review");
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 const base = "http://127.0.0.1:3391", brandId = "review-import-brand", originalId = "review-import-original";
 const manifest = JSON.parse(fs.readFileSync(".next/server/server-reference-manifest.json", "utf8"));

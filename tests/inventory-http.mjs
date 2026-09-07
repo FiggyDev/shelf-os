@@ -9,7 +9,7 @@ import { encodeReply } from "next/dist/compiled/react-server-dom-turbopack/clien
 const url = new URL(process.env.DATABASE_URL);
 assert.equal(process.env.SHELF_REVIEW_DB, "1");
 assert.equal(url.hostname, "127.0.0.1");
-assert.equal(url.port, "55443");
+assert.equal(url.port, process.env.SHELF_REVIEW_DB_PORT ?? "55443");
 assert.equal(url.pathname, "/shelf_review");
 assert.ok(process.env.MC_SESSION_SECRET);
 const base = "http://127.0.0.1:3390";
