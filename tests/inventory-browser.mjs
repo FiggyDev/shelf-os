@@ -1,15 +1,18 @@
-// Real Chromium + built Next server + an explicitly owned PostgreSQL fixture.
+// Selected browser engine + built Next server + an explicitly owned PostgreSQL fixture.
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { chromium, expect } from "@playwright/test";
-import { startReviewServer, stopReviewServer } from "./review-server.mjs";
+import { chromium, webkit, expect } from "@playwright/test";
+import { startHttpsReviewServer as startReviewServer, stopHttpsReviewServer as stopReviewServer } from "./review-https-server.mjs";
+const engine = process.env.SHELF_REVIEW_BROWSER ?? "chromium";
+assert(["chromium", "webkit"].includes(engine), "Unsupported review browser");
+const browserType = engine === "webkit" ? webkit : chromium;
 const url = new URL(process.env.DATABASE_URL);
 assert.equal(process.env.SHELF_REVIEW_DB, "1");
 assert.equal(url.hostname, "127.0.0.1");
 assert.equal(url.port, process.env.SHELF_REVIEW_DB_PORT ?? "55443");
 assert.equal(url.pathname, "/shelf_review");
 const port = 3394;
-const origin = `http://127.0.0.1:${port}`;
+const origin = `https://127.0.0.1:${port}`;
 const brand = `review-browser-${Date.now()}`;
 const product = brand + "-product";
 const path = `/mc/${brand}/inventory`;
@@ -33,8 +36,8 @@ try {
   await client.query('INSERT INTO "Brand"(id,slug,name,"updatedAt") VALUES($1,$1,$2,NOW())', [brand, "Browser fixture"]);
   await client.query('INSERT INTO "Product"(id,"brandId",slug,name,"updatedAt") VALUES($1,$2,$1,$3,NOW())', [product, brand, "Original fixture"]);
   child = await startReviewServer(port);
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  browser = await browserType.launch({ headless: true });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
   await context.route("**/*", async route => {
     if (new URL(route.request().url()).origin === origin) return route.continue();
     blocked.push(route.request().url()); await route.abort();
@@ -85,7 +88,7 @@ try {
     assert.equal(await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   });
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-  console.log(JSON.stringify({ checks, pageErrors: errors, blockedRequests: blocked }, null, 2));
+  console.log(JSON.stringify({ engine, checks, pageErrors: errors, blockedRequests: blocked }, null, 2));
 } finally {
   await browser?.close(); await stopReviewServer(child);
   await client.query('DELETE FROM "AuditEvent" WHERE "entityId"=$1', [product]);
