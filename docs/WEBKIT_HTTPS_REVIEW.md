@@ -1,0 +1,11 @@
+# WebKit and HTTPS browser acceptance
+
+The existing import and inventory runners now support explicit chromium or webkit selection and identify the engine in their output. Both run against the production Next build through a test-only loopback HTTPS proxy. Each run generates a one-day self-signed certificate, trusts it only in the isolated Playwright context, and removes the temporary key/certificate after closing the proxy and owned application child. Production Secure cookie settings remain unchanged.
+
+WebKit initially could not launch because its cached revision did not match the lockfile's Playwright version. Installing the matching test browser resolved startup. The HTTP fixture then redirected WebKit action requests to login: its production Secure cookie was not sent over HTTP. Temporary client/server response diagnostics identified the transport mismatch; all diagnostic application changes were reverted before the final build. This is a test-fixture repair, not a new product finding.
+
+Both engines pass six import checks and seven inventory checks (26 total). They cover real password login, actual production actions and PostgreSQL writes, preview exclusion, audit-failure rollback, preserved selection, lost-response idempotent retry, stale-edit protection, repeated saves, validation, and 390px mobile navigation/layout. Both report zero page errors and zero external blocked requests. WebKit automation is evidence for that engine; it is not a physical iPhone or Safari release-certification claim.
+
+Thirteen component/parser/auth tests, the existing server-ownership check, typecheck, lint and production build pass. Four migrations applied in owned PostgreSQL16; dependencies were installed with the frozen offline lockfile. Historical 23 HTTP/DB cases were not rerun independently; their previous evidence does not become new-head execution evidence. CI now installs and runs both engines.
+
+Outstanding: importer confirmation identity still lives in the mounted component, so reload/tab-close recovery needs a durable resume design. Shared-password demo authorization, full publishing/staff/provider workflows, Firefox, real devices and deployment acceptance remain open. No app runtime, schema, credentials, TTL, provider, existing host/service, merge or deployment changes.
