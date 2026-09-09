@@ -146,7 +146,7 @@ Working today — 12 routes, all rendering against real data:
 - [x] Customers — per-channel consent with source and timestamp
 - [x] Specials — state-scoped promotions
 - [x] Share & QR — per-placement codes with scan attribution
-- [x] Staff and roles
+- [x] Staff records and planned role descriptions (not enforced permissions)
 - [x] Audit log — append-only
 - [x] Branding — asset slots on a transparency checkerboard
 - [x] Shared-password gate over all of `/mc/*` (signed httpOnly cookie,
@@ -154,9 +154,10 @@ Working today — 12 routes, all rendering against real data:
 
 **Not built yet**
 - [ ] **Per-user login.** The gate is one shared password. Audit events
-      are attributed to a `StaffUser`, and with a shared password that
-      attribution is an assumption, not a fact. This must be replaced
-      with per-user sign-in before a brand puts a second person in here.
+      created by current inventory actions have no individual staff actor.
+      Older `StaffUser` attribution is not verified identity. Staff records and
+      active/disabled flags do not grant or revoke shared-password access.
+      Per-user sign-in and authorization are required for individual permissions.
 - [ ] Automated retailer listing ingestion — listings are entered by hand
 - [ ] Compliance checker reading `ComplianceRule`
 - [ ] Actual alert delivery (SMS/email providers are not wired)

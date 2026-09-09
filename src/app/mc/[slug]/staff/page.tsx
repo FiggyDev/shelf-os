@@ -84,14 +84,23 @@ export default async function StaffPage({
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Staff</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-          Who has access, and what they can change. Every action they take is
-          attributed in the audit log.
+          Staff records and planned roles. This pilot uses one shared password;
+          these records do not control sign-in or enforce individual permissions.
         </p>
       </header>
 
+      <p className="mb-6 max-w-3xl text-sm text-amber-200">
+        Everyone with the shared password has the same pilot access. An active
+        staff record does not grant access, and disabling a record does not
+        revoke it. Inventory changes made through this pilot have no individual
+        staff actor. Older attributed counts are historical records, not verified
+        evidence of who made a change. Per-user sign-in and role enforcement are
+        required before operating with individual staff permissions.
+      </p>
+
       <section className="mb-10">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-          People
+          Staff records
         </h2>
         <div className="overflow-hidden rounded-xl border border-white/10">
           <table className="w-full text-sm">
@@ -99,8 +108,8 @@ export default async function StaffPage({
               <tr>
                 <th className="px-4 py-3 font-semibold">Name</th>
                 <th className="px-4 py-3 font-semibold">Role</th>
-                <th className="px-4 py-3 text-right font-semibold">Changes made</th>
-                <th className="px-4 py-3 text-right font-semibold">Status</th>
+                <th className="px-4 py-3 text-right font-semibold">Recorded attribution</th>
+                <th className="px-4 py-3 text-right font-semibold">Record status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -138,7 +147,7 @@ export default async function StaffPage({
 
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-          What each role can do
+          Planned role permissions
         </h2>
         <div className="grid gap-3 sm:grid-cols-2">
           {ROLES.map((r) => (
