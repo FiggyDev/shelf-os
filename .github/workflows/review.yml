@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review, codex/shelf-browser-review, codex/shelf-import-browser-review, codex/shelf-webkit-review, codex/shelf-firefox-review, codex/shelf-dependency-review]
+    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review, codex/shelf-browser-review, codex/shelf-import-browser-review, codex/shelf-webkit-review, codex/shelf-firefox-review, codex/shelf-dependency-review, codex/shelf-import-recovery]
 permissions:
   contents: read
 jobs:

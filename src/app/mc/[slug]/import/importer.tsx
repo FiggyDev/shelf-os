@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition, useEffect, useCallback } from "react";
 import { parseChatMenu, type ParsedProduct } from "@/lib/chat-menu-parser";
 
 import type { MenuImportRequest, MenuImportResult } from "@/lib/menu-import";
+
+import { readImportRecovery, prepareImport, confirmImport, discardImport, recoveryKey, recoveryRequest, type ImportRecovery } from "@/lib/import-recovery";
 
 const SAMPLE = `🔥🔥 VERIFIED CHAT MENU 🔥🔥
 
@@ -33,10 +35,50 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
 }) {
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<MenuImportResult | null>(null);
-  const request = useRef<{ fingerprint: string; id: string } | null>(null);
+  const recoveryRef = useRef<ImportRecovery | null>(null);
+  const [recovery, setRecovery] = useState<ImportRecovery | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [storageError, setStorageError] = useState(false);
+  const [newImport, setNewImport] = useState(false);
   const inFlight = useRef(false);
   const [raw, setRaw] = useState("");
   const [excluded, setExcluded] = useState<Set<number>>(new Set());
+
+  const restore = useCallback((entry: ImportRecovery | null, keepInput = false) => {
+    const previous = recoveryRef.current;
+    recoveryRef.current = entry;
+    setRecovery(entry);
+    setLoaded(true);
+    setStorageError(false);
+    if (entry?.id === previous?.id && entry?.phase === previous?.phase) return;
+    setNewImport(false);
+    if (entry?.phase === "pending") {
+      setRaw(entry.raw);
+      setExcluded(new Set(parseChatMenu(entry.raw).products.filter(row => !entry.lineNumbers.includes(row.lineNumber)).map(row => row.lineNumber)));
+      setStatus({ ok: false, error: "This import is unconfirmed. Retry this selection safely, even if it already saved." });
+    } else if (entry?.phase === "confirmed") {
+      if (!keepInput) { setRaw(""); setExcluded(new Set()); }
+      setStatus({ ok: true, count: entry.count });
+    } else if (entry?.phase === "discarded") {
+      setRaw(""); setExcluded(new Set()); setStatus(null);
+    }
+  }, []);
+  const refreshRecovery = useCallback(async () => {
+    try { restore(await readImportRecovery(brandSlug)); }
+    catch { setLoaded(true); setStorageError(true); }
+  }, [brandSlug, restore]);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try { const entry = await readImportRecovery(brandSlug); if (active) restore(entry); }
+      catch { if (active) { setLoaded(true); setStorageError(true); } }
+    };
+    void refresh();
+    const changed = (event: StorageEvent) => { if (event.key === recoveryKey(brandSlug) || event.key === null) void refresh(); };
+    window.addEventListener("storage", changed);
+    return () => { active = false; window.removeEventListener("storage", changed); };
+  }, [brandSlug, restore]);
+  const locked = !loaded || pending || storageError || recovery?.phase === "pending" || (recovery?.phase === "confirmed" && !newImport);
 
   const result = useMemo(
     () => (raw.trim() ? parseChatMenu(raw) : null),
@@ -73,7 +115,7 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
           </label>
           <button
             type="button"
-            disabled={pending}
+            disabled={locked}
             onClick={() => {
               setStatus(null);
               setRaw(SAMPLE);
@@ -88,7 +130,7 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
         <textarea
           id="raw-menu"
           value={raw}
-          disabled={pending}
+          disabled={locked}
           maxLength={50000}
           onChange={(e) => {
             setStatus(null);
@@ -101,6 +143,29 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
           className="w-full resize-y rounded-lg border border-white/10 bg-black/40 p-4 font-mono text-sm text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-white/25"
         />
       </div>
+
+      <p className="text-sm text-zinc-400">
+        Before importing, Shelf saves this menu and your selected rows in this browser so you can retry after a reload or closed tab. It stays on this device until a confirmed save or explicit discard. A small receipt remains after saving to protect older tabs. Clearing browser data removes recovery; other devices and private browsing sessions may not share it.
+      </p>
+      {!loaded && <p role="status">Checking browser recovery…</p>}
+      {recovery?.phase === "pending" && <p className="text-sm text-amber-200">An unconfirmed import is saved in this browser. Its menu and selection are locked until confirmation or explicit discard.</p>}
+      {storageError && <div role="alert" className="text-sm text-amber-200">
+        {status?.ok ? "Saved on the server, but the browser copy could not be cleared. Reloading may offer a safe retry of the same confirmation." : "Browser recovery could not be read or saved. No new confirmation can be sent until recovery storage is available."}
+        <button type="button" disabled={pending} className="ml-2 underline" onClick={() => void refreshRecovery()}>Check recovery storage</button>
+      </div>}
+      {(recovery?.phase === "pending" || storageError) && <button type="button" disabled={pending} className="text-sm underline" onClick={() => {
+        if (!window.confirm("Discard this browser recovery copy? The import may already be saved on the server. Discarding does not undo it; importing again can create duplicates. Check Inventory first.")) return;
+        startTransition(async () => {
+          try { restore(await discardImport(brandSlug, recoveryRef.current, storageError)); }
+          catch { setStorageError(true); }
+        });
+      }}>Discard recovery copy</button>}
+      {recovery?.phase === "confirmed" && !newImport && <button type="button" disabled={pending || storageError} className="text-sm underline" onClick={() => {
+        setNewImport(true); setStatus(null); setRaw(""); setExcluded(new Set());
+      }}>Start another import</button>}
+      {status && <p role="status" className="text-sm text-zinc-200">
+        {status.ok ? <>Saved {status.count} draft{status.count === 1 ? "" : "s"}. <a className="underline" href={`/mc/${brandSlug}/inventory`}>Review in Inventory</a> before publishing.</> : status.error}
+      </p>}
 
       {result && (
         <>
@@ -153,7 +218,7 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
                     product={p}
                     excluded={excluded.has(p.lineNumber)}
                     onToggle={() => toggle(p.lineNumber)}
-                    disabled={pending}
+                    disabled={locked}
                   />
                 ))}
               </tbody>
@@ -181,17 +246,26 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              disabled={included.length === 0 || included.length > 200 || pending || status?.ok === true}
+              disabled={!loaded || storageError || included.length === 0 || included.length > 200 || pending || status?.ok === true}
               onClick={() => {
-                if (inFlight.current) return;
-                const lineNumbers = included.map(row => row.lineNumber);
-                const fingerprint = JSON.stringify([brandSlug, raw, lineNumbers]);
-                if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
-                const requestId = request.current.id;
+                if (inFlight.current || (recoveryRef.current?.phase === "confirmed" && !newImport)) return;
                 inFlight.current = true;
                 startTransition(async () => {
-                  try { setStatus(await importAction({ brandSlug, raw, lineNumbers, requestId })); }
-                  catch { setStatus({ ok: false, error: "Import could not be confirmed. Retry this selection safely." }); }
+                  try {
+                    const prepared = await prepareImport(brandSlug, recoveryRef.current, { brandSlug, raw, lineNumbers: included.map(row => row.lineNumber), requestId: crypto.randomUUID() });
+                    restore(prepared.entry, true);
+                    if (!prepared.ready) return;
+                    let result: MenuImportResult;
+                    try { result = await importAction(recoveryRequest(prepared.entry)); }
+                    catch { result = { ok: false, error: "Import could not be confirmed. Retry this selection safely." }; }
+                    // Another tab may have discarded/replaced this confirmation while the action ran.
+                    if (recoveryRef.current?.id !== prepared.entry.id || recoveryRef.current.phase !== "pending") return;
+                    if (result.ok) {
+                      setStatus(result);
+                      try { restore(await confirmImport(brandSlug, prepared.entry.id, result.count), true); }
+                      catch { setStorageError(true); }
+                    } else setStatus(result);
+                  } catch { setStorageError(true); }
                   finally { inFlight.current = false; }
                 });
               }}
@@ -204,9 +278,6 @@ export function ChatMenuImporter({ brandSlug, importAction }: {
               Creates new hidden drafts; existing products are not replaced. Prices and stock markers are retained as review notes. Limit: 200 products.
             </span>
           </div>
-          {status && <p role="status" className="text-sm text-zinc-200">
-            {status.ok ? <>Saved {status.count} draft{status.count === 1 ? "" : "s"}. <a className="underline" href={`/mc/${brandSlug}/inventory`}>Review in Inventory</a> before publishing.</> : status.error}
-          </p>}
         </>
       )}
     </div>
