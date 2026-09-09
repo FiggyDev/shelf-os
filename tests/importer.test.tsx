@@ -8,6 +8,7 @@ import { ChatMenuImporter } from "../src/app/mc/[slug]/import/importer";
 test("confirmation sends selected rows, retains retry identity and reports saved drafts", async () => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://review.invalid" });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
+  Object.defineProperty(dom.window.navigator, "locks", { value: { request: async (_name: string, run: () => unknown) => run() } });
   const container = document.getElementById("root")!;
   const root = createRoot(container);
   const calls: { raw: string; lineNumbers: number[]; requestId: string; brandSlug: string }[] = [];
