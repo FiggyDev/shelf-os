@@ -19,6 +19,9 @@ const path = `/mc/${brand}/inventory`;
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 const checks = [], errors = [], blocked = [];
 let child, browser;
+let holdScripts = false;
+let releaseScripts;
+const scriptsReleased = new Promise(resolve => { releaseScripts = resolve; });
 async function check(name, fn) { await fn(); checks.push(name); }
 async function row() { return (await client.query('SELECT name FROM "Product" WHERE id=$1', [product])).rows[0].name; }
 async function audits() { return (await client.query('SELECT count(*)::int AS count FROM "AuditEvent" WHERE "entityId"=$1', [product])).rows[0].count; }
@@ -39,7 +42,10 @@ try {
   browser = await browserType.launch({ headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   await context.route("**/*", async route => {
-    if (new URL(route.request().url()).origin === origin) return route.continue();
+    if (new URL(route.request().url()).origin === origin) {
+      if (holdScripts && route.request().resourceType() === "script") await scriptsReleased;
+      return route.continue();
+    }
     blocked.push(route.request().url()); await route.abort();
   });
   context.on("page", page => page.on("pageerror", error => errors.push(String(error))));
@@ -64,9 +70,13 @@ try {
     await expect(second.getByLabel("Product name", { exact: true })).toHaveValue("Unsaved second edit");
     assert.equal(await row(), "First browser save"); assert.equal(await audits(), 1);
   });
-  await check("explicit reload gets the current revision and saves a fresh edit", async () => {
+  await check("reload disables the editor until JavaScript is ready, then saves the current revision", async () => {
+    holdScripts = true;
     await second.getByRole("button", { name: "Reload inventory", exact: true }).click();
     await expect(second.locator('button[aria-expanded="false"]')).toBeVisible();
+    await expect(second.locator('button[aria-expanded="false"]')).toBeDisabled();
+    holdScripts = false;
+    releaseScripts();
     await open(second); await expect(second.getByLabel("Product name", { exact: true })).toHaveValue("First browser save");
     await save(second, "Fresh browser save"); assert.equal(await audits(), 2);
   });
@@ -90,6 +100,7 @@ try {
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
   console.log(JSON.stringify({ engine, checks, pageErrors: errors, blockedRequests: blocked }, null, 2));
 } finally {
+  releaseScripts();
   await browser?.close(); await stopReviewServer(child);
   await client.query('DELETE FROM "AuditEvent" WHERE "entityId"=$1', [product]);
   await client.query('DELETE FROM "Brand" WHERE id=$1', [brand]);

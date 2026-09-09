@@ -1,7 +1,12 @@
 "use client";
 
-import { useActionState, useState, useCallback } from "react";
+import { useActionState, useState, useCallback, useSyncExternalStore } from "react";
 import { updateProduct, type ActionResult } from "./actions";
+
+// Keep the server-rendered toggle disabled until React has attached its handler.
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 export interface EditableProduct {
   id: string;
@@ -31,6 +36,7 @@ export function ProductEditor({
   updateAction?: typeof updateProduct;
 }) {
   const [open, setOpen] = useState(false);
+  const ready = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03]">
@@ -38,6 +44,7 @@ export function ProductEditor({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        disabled={!ready}
         className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-white/[0.02]"
       >
         <span
