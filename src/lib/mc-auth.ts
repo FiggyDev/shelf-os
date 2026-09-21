@@ -3,12 +3,12 @@
  *
  * A single shared password. This keeps the demo off the open internet;
  * it is NOT per-user authentication and deliberately does not pretend to
- * be. Everything in Mission Control is still attributed to a StaffUser in
- * the audit log, and with a shared password that attribution is a guess.
+ * be. Inventory audit entries record shared-password authentication,
+ * without inventing a StaffUser identity.
  * Before a real brand puts two people in here, this needs replacing with
  * per-user login against StaffUser.
  *
- * Runs in middleware (edge runtime), so it uses Web Crypto only — no
+ * Runs in the proxy and actions, so it uses Web Crypto only — no
  * Node `crypto` import.
  */
 
@@ -61,11 +61,15 @@ export async function issueToken(): Promise<string> {
 
 /** Verifies expiry AND signature, so the expiry can't simply be edited. */
 export async function tokenIsValid(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+  if (!process.env.MC_PASSWORD || !token || !/^\d+\.[a-f0-9]{64}$/.test(token)) return false;
   const [expires, sig] = token.split(".");
-  if (!expires || !sig) return false;
-  if (!Number(expires) || Number(expires) < Date.now()) return false;
-  return safeEqual(sig, await sign(expires));
+  if (!Number.isSafeInteger(Number(expires)) || Number(expires) <= Date.now()) return false;
+  try {
+    return safeEqual(sig, await sign(expires));
+  } catch {
+    // Missing or invalid signing configuration must not authorize an action.
+    return false;
+  }
 }
 
 export const SESSION_COOKIE = COOKIE;

@@ -1,3 +1,4 @@
+import { inventoryRevision } from "@/lib/inventory-revision";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { ProductEditor, type EditableProduct } from "./product-editor";
@@ -36,10 +37,12 @@ export default async function InventoryPage({
 
   const editable: EditableProduct[] = products.map((p) => ({
     id: p.id,
+    revision: inventoryRevision(p),
     name: p.name,
     category: p.category,
     description: p.description,
     published: p.published,
+    importNotes: p.importNotes,
     variants: p.variants.map((v) => {
       const batch = v.batches[0];
       return {

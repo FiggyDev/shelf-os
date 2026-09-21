@@ -282,9 +282,12 @@ export function parseChatMenu(input: string): ParseResult {
       return;
     }
 
-    const soldOut = SOLD_OUT_PATTERNS.some((p) => p.test(cleaned));
+    // Read status before decorative emoji are stripped. "Almost gone" is
+    // a low-stock phrase, not the standalone sold-out marker "gone".
+    const statusText = raw.replace(/\balmost\s+gone\b/gi, " low ");
+    const soldOut = SOLD_OUT_PATTERNS.some((p) => p.test(statusText));
     const lowStock =
-      !soldOut && LOW_STOCK_PATTERNS.some((p) => p.test(cleaned));
+      !soldOut && LOW_STOCK_PATTERNS.some((p) => p.test(statusText));
     const strainType = detectStrainType(cleaned);
     const ownPrices = extractPrices(cleaned);
 
@@ -295,7 +298,7 @@ export function parseChatMenu(input: string): ParseResult {
       .replace(/\(\s*[ish]\s*\)|\[\s*[ish]\s*\]/gi, " ")
       .replace(/\b(indica|sativa|hybrid|ind|sat|hyb)\b/gi, " ")
       .replace(
-        /\bsold\s*out\b|\bs\/?o\b|\bout of stock\b|\boos\b|\bgone\b|\bunavailable\b|\blow\b|\blast (one|few|couple)\b/gi,
+        /\balmost\s+gone\b|\brunning\s+low\b|\bsold\s*out\b|\bs\/?o\b|\bout of stock\b|\boos\b|\bgone\b|\bunavailable\b|\blow\b|\blast (one|few|couple)\b/gi,
         " ",
       )
       .replace(/[.,;:|]+\s*$/, "")

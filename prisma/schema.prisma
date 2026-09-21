@@ -57,6 +57,7 @@ model Brand {
   /// market requires it. Placeholder in demo tenants.
   licenseNumber String?
 
+  menuImports MenuImport[]
   products  Product[]
   retailers BrandRetailer[]
   rules     ComplianceRule[]
@@ -94,6 +95,8 @@ model Product {
   description String?  @db.Text
   category    String?
   strainType  StrainType?
+  /// Original import context; review notes, not verified live price/stock.
+  importNotes String? @db.Text
 
   imageUrl    String?
 
@@ -503,4 +506,16 @@ model MenuEvent {
   createdAt  DateTime @default(now())
 
   @@index([brandId, eventType, createdAt])
+}
+
+/// A completed confirmation, retained to make network retries idempotent.
+model MenuImport {
+  id String @id @default(cuid())
+  brandId String
+  brand Brand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  requestId String
+  requestHash String
+  productIds String[]
+  createdAt DateTime @default(now())
+  @@unique([brandId, requestId])
 }

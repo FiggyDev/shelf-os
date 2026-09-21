@@ -1,8 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { z } from "zod";
+import { inventoryRevision } from "@/lib/inventory-revision";
 import { prisma } from "@/lib/db";
+import { SESSION_COOKIE, tokenIsValid } from "@/lib/mc-auth";
 
 /**
  * Inventory mutations.
@@ -15,6 +18,7 @@ import { prisma } from "@/lib/db";
 
 const ProductUpdate = z.object({
   productId: z.string().min(1),
+  revision: z.string().regex(/^[a-f0-9]{64}$/, "Reload inventory before saving this form."),
   brandSlug: z.string().min(1),
   name: z.string().trim().min(1, "Name is required").max(120),
   category: z.string().trim().max(60).nullable(),
@@ -22,15 +26,11 @@ const ProductUpdate = z.object({
   published: z.boolean(),
 });
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+export type ActionResult = { ok: true; revision?: string } | { ok: false; error: string; conflict?: boolean; revision?: string };
 
-/** The staff member acting. Real auth replaces this; the shape doesn't change. */
-async function currentActor(brandId: string) {
-  return prisma.staffUser.findFirst({
-    where: { brandId, active: true },
-    orderBy: { role: "asc" },
-    select: { id: true },
-  });
+/** The pilot session grants shared access, never a particular staff identity. */
+async function hasSession() {
+  return tokenIsValid((await cookies()).get(SESSION_COOKIE)?.value);
 }
 
 function describeChanges(
@@ -59,8 +59,10 @@ export async function updateProduct(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
   const parsed = ProductUpdate.safeParse({
     productId: formData.get("productId"),
+    revision: formData.get("revision"),
     brandSlug: formData.get("brandSlug"),
     name: formData.get("name"),
     category: (formData.get("category") as string) || null,
@@ -76,38 +78,47 @@ export async function updateProduct(
   }
   const input = parsed.data;
 
-  const existing = await prisma.product.findUnique({
-    where: { id: input.productId },
-    include: { brand: { select: { id: true, slug: true } } },
-  });
+  const result = await prisma.$transaction<ActionResult>(async (tx) => {
+    // Lock before reading: audits describe the state this write replaces.
+    await tx.$queryRaw`
+      SELECT p.id FROM "Product" p JOIN "Brand" b ON b.id = p."brandId"
+      WHERE p.id = ${input.productId} AND b.slug = ${input.brandSlug}
+      FOR UPDATE OF p
+    `;
+    const existing = await tx.product.findUnique({
+      where: { id: input.productId },
+      include: { brand: { select: { id: true, slug: true } } },
+    });
 
-  if (!existing) return { ok: false, error: "Product not found" };
-  // Tenant check — never trust a product id from the client on its own.
-  if (existing.brand.slug !== input.brandSlug) {
-    return { ok: false, error: "Product does not belong to this brand" };
-  }
+    if (!existing) return { ok: false, error: "Product not found" };
+    // Tenant check — never trust a product id from the client on its own.
+    if (existing.brand.slug !== input.brandSlug) {
+      return { ok: false, error: "Product does not belong to this brand" };
+    }
 
-  const changes = describeChanges(
-    {
-      name: existing.name,
-      category: existing.category,
-      description: existing.description,
-      published: existing.published,
-    },
-    {
-      name: input.name,
-      category: input.category,
-      description: input.description,
-      published: input.published,
-    },
-  );
+    const changes = describeChanges(
+      {
+        name: existing.name,
+        category: existing.category,
+        description: existing.description,
+        published: existing.published,
+      },
+      {
+        name: input.name,
+        category: input.category,
+        description: input.description,
+        published: input.published,
+      },
+    );
 
-  if (changes.length === 0) return { ok: true };
+    const revision = inventoryRevision(existing);
+    // An identical retry is harmless, including after another editor saved it.
+    if (changes.length === 0) return { ok: true, revision };
+    if (input.revision !== revision) {
+      return { ok: false, conflict: true, error: "This product changed since you opened it. Copy your edits, then reload inventory to review the latest version." };
+    }
 
-  const actor = await currentActor(existing.brand.id);
-
-  await prisma.$transaction([
-    prisma.product.update({
+    await tx.product.update({
       where: { id: input.productId },
       data: {
         name: input.name,
@@ -115,24 +126,26 @@ export async function updateProduct(
         description: input.description,
         published: input.published,
       },
-    }),
-    prisma.auditEvent.create({
+    });
+    await tx.auditEvent.create({
       data: {
         brandId: existing.brand.id,
-        actorId: actor?.id ?? null,
+        actorId: null,
         action: "product.updated",
         entityType: "Product",
         entityId: input.productId,
         summary: `${existing.name}: ${changes.join(", ")}`,
-        metadata: { changes },
+        metadata: { changes, authentication: "shared_password" },
       },
-    }),
-  ]);
+    });
+    return { ok: true, revision: inventoryRevision(input) };
+  });
+  if (!result.ok) return result;
 
   revalidatePath(`/mc/${input.brandSlug}/inventory`);
   revalidatePath(`/mc/${input.brandSlug}/log`);
   revalidatePath(`/b/${input.brandSlug}`);
-  return { ok: true };
+  return result;
 }
 
 /** Fast path for the visibility switch — same audit guarantee. */
@@ -140,35 +153,43 @@ export async function toggleProductPublished(
   brandSlug: string,
   productId: string,
 ): Promise<ActionResult> {
-  const existing = await prisma.product.findUnique({
-    where: { id: productId },
-    include: { brand: { select: { id: true, slug: true } } },
-  });
+  if (!(await hasSession())) return { ok: false, error: "Sign in to edit inventory." };
+  const result = await prisma.$transaction<ActionResult>(async (tx) => {
+    // Lock before reading: audits describe the state this write replaces.
+    await tx.$queryRaw`
+      SELECT p.id FROM "Product" p JOIN "Brand" b ON b.id = p."brandId"
+      WHERE p.id = ${productId} AND b.slug = ${brandSlug}
+      FOR UPDATE OF p
+    `;
+    const existing = await tx.product.findUnique({
+      where: { id: productId },
+      include: { brand: { select: { id: true, slug: true } } },
+    });
 
-  if (!existing) return { ok: false, error: "Product not found" };
-  if (existing.brand.slug !== brandSlug) {
-    return { ok: false, error: "Product does not belong to this brand" };
-  }
+    if (!existing) return { ok: false, error: "Product not found" };
+    if (existing.brand.slug !== brandSlug) {
+      return { ok: false, error: "Product does not belong to this brand" };
+    }
 
-  const next = !existing.published;
-  const actor = await currentActor(existing.brand.id);
-
-  await prisma.$transaction([
-    prisma.product.update({
+    const next = !existing.published;
+    await tx.product.update({
       where: { id: productId },
       data: { published: next },
-    }),
-    prisma.auditEvent.create({
+    });
+    await tx.auditEvent.create({
       data: {
         brandId: existing.brand.id,
-        actorId: actor?.id ?? null,
+        actorId: null,
         action: next ? "product.published" : "product.hidden",
         entityType: "Product",
         entityId: productId,
         summary: `${existing.name} ${next ? "shown on" : "hidden from"} the public menu`,
+        metadata: { authentication: "shared_password" },
       },
-    }),
-  ]);
+    });
+    return { ok: true };
+  });
+  if (!result.ok) return result;
 
   revalidatePath(`/mc/${brandSlug}/inventory`);
   revalidatePath(`/mc/${brandSlug}/log`);

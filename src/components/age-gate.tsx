@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+
+function subscribeToStorage(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+function serverConfirmation(): undefined {
+  return undefined;
+}
 
 /**
  * Age verification gate.
@@ -24,25 +33,38 @@ export function AgeGate({
   minimumAge: number;
   children: React.ReactNode;
 }) {
-  const storageKey = `age-ok:${brandName}`;
-  // undefined = still reading storage; avoids flashing the gate to a
-  // visitor who already confirmed.
-  const [confirmed, setConfirmed] = useState<boolean | undefined>(undefined);
+  // A different age requirement needs its own attestation. The key also
+  // resets in-memory confirmation when navigating between brands/ages.
+  const storageKey = `age-ok:v2:${JSON.stringify([brandName, minimumAge])}`;
+  return (
+    <StoredAgeGate key={storageKey} storageKey={storageKey} brandName={brandName} minimumAge={minimumAge}>
+      {children}
+    </StoredAgeGate>
+  );
+}
 
-  useEffect(() => {
+function StoredAgeGate({ storageKey, brandName, minimumAge, children }: {
+  storageKey: string;
+  brandName: string;
+  minimumAge: number;
+  children: React.ReactNode;
+}) {
+  // The server snapshot keeps initial HTML closed and matches hydration.
+  const storedConfirmation = useSyncExternalStore(subscribeToStorage, () => {
     try {
-      setConfirmed(window.sessionStorage.getItem(storageKey) === "1");
+      return window.sessionStorage.getItem(storageKey) === "1";
     } catch {
-      // Private mode or storage disabled — gate every time rather than fail open.
-      setConfirmed(false);
+      return false;
     }
-  }, [storageKey]);
+  }, serverConfirmation);
+  // Permit this visit after a click even if storage is unavailable.
+  const [confirmedForVisit, setConfirmedForVisit] = useState(false);
 
-  if (confirmed === undefined) {
+  if (storedConfirmation === undefined) {
     return <div className="min-h-screen bg-stone-50" aria-hidden />;
   }
 
-  if (confirmed) return <>{children}</>;
+  if (storedConfirmation || confirmedForVisit) return <>{children}</>;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-900 px-6">
@@ -60,7 +82,7 @@ export function AgeGate({
               } catch {
                 /* storage unavailable — continue for this render only */
               }
-              setConfirmed(true);
+              setConfirmedForVisit(true);
             }}
             className="flex-1 rounded-lg bg-stone-900 px-4 py-3 font-medium text-white transition hover:bg-stone-700"
           >

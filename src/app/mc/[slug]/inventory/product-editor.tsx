@@ -1,14 +1,21 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useCallback, useSyncExternalStore } from "react";
 import { updateProduct, type ActionResult } from "./actions";
+
+// Keep the server-rendered toggle disabled until React has attached its handler.
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 export interface EditableProduct {
   id: string;
+  revision: string;
   name: string;
   category: string | null;
   description: string | null;
   published: boolean;
+  importNotes: string | null;
   variants: {
     id: string;
     size: string;
@@ -22,15 +29,14 @@ export interface EditableProduct {
 export function ProductEditor({
   product,
   brandSlug,
+  updateAction = updateProduct,
 }: {
   product: EditableProduct;
   brandSlug: string;
+  updateAction?: typeof updateProduct;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction, pending] = useActionState<ActionResult | null, FormData>(
-    updateProduct,
-    null,
-  );
+  const ready = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03]">
@@ -38,6 +44,7 @@ export function ProductEditor({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        disabled={!ready}
         className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-white/[0.02]"
       >
         <span
@@ -55,118 +62,200 @@ export function ProductEditor({
             variant{product.variants.length === 1 ? "" : "s"}
           </span>
         </span>
-        {state?.ok && !open && (
-          <span className="text-xs text-emerald-400">Saved</span>
-        )}
         <span className="text-zinc-500">{open ? "−" : "+"}</span>
       </button>
 
       {open && (
-        <form action={formAction} className="border-t border-white/10 p-5">
-          <input type="hidden" name="productId" value={product.id} />
-          <input type="hidden" name="brandSlug" value={brandSlug} />
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Product name">
-              <input
-                name="name"
-                defaultValue={product.name}
-                required
-                maxLength={120}
-                className="input"
-              />
-            </Field>
-            <Field label="Category">
-              <input
-                name="category"
-                defaultValue={product.category ?? ""}
-                maxLength={60}
-                placeholder="Flower, Edibles…"
-                className="input"
-              />
-            </Field>
-          </div>
-
-          <div className="mt-4">
-            <Field label="Description">
-              <textarea
-                name="description"
-                defaultValue={product.description ?? ""}
-                rows={3}
-                maxLength={2000}
-                className="input resize-y"
-              />
-            </Field>
-          </div>
-
-          <label className="mt-4 flex items-center gap-3 text-sm text-zinc-300">
-            <input
-              type="checkbox"
-              name="published"
-              defaultChecked={product.published}
-              className="h-4 w-4 accent-emerald-400"
-            />
-            Show on the public menu
-          </label>
-
-          {/* Variants are read-only here — potency and COAs are batch-level
-              records, edited where the batch lives, not inline. */}
-          {product.variants.length > 0 && (
-            <div className="mt-5 rounded-lg border border-white/10 bg-black/30 p-4">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                Variants
-              </div>
-              <ul className="space-y-1.5 text-sm">
-                {product.variants.map((v) => (
-                  <li
-                    key={v.id}
-                    className="flex flex-wrap items-center justify-between gap-2 text-zinc-400"
-                  >
-                    <span className="font-medium text-zinc-200">{v.size}</span>
-                    <span className="flex items-center gap-3">
-                      {v.thc && (
-                        <span>
-                          THC {v.thc}
-                          {v.potencyUnit === "PERCENT" ? "%" : "mg"}
-                        </span>
-                      )}
-                      {v.batchCode && (
-                        <span className="font-mono text-xs text-zinc-500">
-                          {v.batchCode}
-                        </span>
-                      )}
-                      {v.coaUrl ? (
-                        <span className="text-emerald-400">COA ✓</span>
-                      ) : (
-                        <span className="text-amber-400">No COA</span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className="mt-5 flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-300 disabled:opacity-50"
-            >
-              {pending ? "Saving…" : "Save changes"}
-            </button>
-            {state && !state.ok && (
-              <span className="text-sm text-rose-400">{state.error}</span>
-            )}
-            {state?.ok && (
-              <span className="text-sm text-emerald-400">
-                Saved and logged to the audit trail
-              </span>
-            )}
-          </div>
-        </form>
+        <ProductForm
+          product={product}
+          brandSlug={brandSlug}
+          updateAction={updateAction}
+        />
       )}
     </div>
+  );
+}
+
+function ProductForm({
+  product: currentProduct,
+  brandSlug,
+  updateAction,
+}: {
+  product: EditableProduct;
+  brandSlug: string;
+  updateAction: typeof updateProduct;
+}) {
+  // An open form retains its original fields and baseline across server refreshes.
+  // Closing and reopening starts a fresh form from the current server props.
+  const [product] = useState(currentProduct);
+  const [fields, setFields] = useState({
+    name: product.name,
+    category: product.category ?? "",
+    description: product.description ?? "",
+    published: product.published,
+  });
+  const preserveFormDraft = useCallback((form: HTMLFormElement | null) => {
+    if (!form) return;
+    // React resets native forms after actions. Preserve this editor's draft
+    // values rather than restoring its pre-save defaults under a new revision.
+    const preserveDraft = (event: Event) => event.preventDefault();
+    form.addEventListener("reset", preserveDraft);
+    return () => form.removeEventListener("reset", preserveDraft);
+  }, []);
+  const [state, formAction, pending] = useActionState<
+    ActionResult | null,
+    FormData
+  >(async (previous, form) => {
+    const result = await updateAction(previous, form);
+    // Failed validation must keep the baseline that was actually submitted.
+    return {
+      ...result,
+      revision: result.ok ? result.revision : String(form.get("revision")),
+    };
+  }, null);
+  return (
+    <form
+      action={formAction}
+      ref={preserveFormDraft}
+      className="border-t border-white/10 p-5"
+    >
+      <input type="hidden" name="productId" value={product.id} />
+      <input
+        type="hidden"
+        name="revision"
+        value={state?.revision ?? product.revision}
+      />
+      <input type="hidden" name="brandSlug" value={brandSlug} />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Product name">
+          <input
+            name="name"
+            value={fields.name}
+            onChange={(event) =>
+              setFields({ ...fields, name: event.target.value })
+            }
+            required
+            maxLength={120}
+            className="input"
+          />
+        </Field>
+        <Field label="Category">
+          <input
+            name="category"
+            value={fields.category}
+            onChange={(event) =>
+              setFields({ ...fields, category: event.target.value })
+            }
+            maxLength={60}
+            placeholder="Flower, Edibles…"
+            className="input"
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4">
+        <Field label="Description">
+          <textarea
+            name="description"
+            value={fields.description}
+            onChange={(event) =>
+              setFields({ ...fields, description: event.target.value })
+            }
+            rows={3}
+            maxLength={2000}
+            className="input resize-y"
+          />
+        </Field>
+      </div>
+
+      <label className="mt-4 flex items-center gap-3 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          name="published"
+          checked={fields.published}
+          onChange={(event) =>
+            setFields({ ...fields, published: event.target.checked })
+          }
+          className="h-4 w-4 accent-emerald-400"
+        />
+        Show on the public menu
+      </label>
+
+      {product.importNotes && (
+        <details className="mt-4 rounded border border-white/10 p-3 text-sm text-zinc-400">
+          <summary>Imported source — verify before publishing</summary>
+          <p className="mt-2 whitespace-pre-wrap">{product.importNotes}</p>
+        </details>
+      )}
+
+      {/* Variants are read-only here — potency and COAs are batch-level
+              records, edited where the batch lives, not inline. */}
+      {product.variants.length > 0 && (
+        <div className="mt-5 rounded-lg border border-white/10 bg-black/30 p-4">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-500">
+            Variants
+          </div>
+          <ul className="space-y-1.5 text-sm">
+            {product.variants.map((v) => (
+              <li
+                key={v.id}
+                className="flex flex-wrap items-center justify-between gap-2 text-zinc-400"
+              >
+                <span className="font-medium text-zinc-200">{v.size}</span>
+                <span className="flex items-center gap-3">
+                  {v.thc && (
+                    <span>
+                      THC {v.thc}
+                      {v.potencyUnit === "PERCENT" ? "%" : "mg"}
+                    </span>
+                  )}
+                  {v.batchCode && (
+                    <span className="font-mono text-xs text-zinc-500">
+                      {v.batchCode}
+                    </span>
+                  )}
+                  {v.coaUrl ? (
+                    <span className="text-emerald-400">COA ✓</span>
+                  ) : (
+                    <span className="text-amber-400">No COA</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-5 flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-black transition hover:bg-emerald-300 disabled:opacity-50"
+        >
+          {pending ? "Saving…" : "Save changes"}
+        </button>
+        {state && !state.ok && (
+          <span role="alert" className="text-sm text-rose-400">
+            {state.error}
+            {state.conflict && (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="ml-2 underline"
+              >
+                Reload inventory
+              </button>
+            )}
+          </span>
+        )}
+        {state?.ok && (
+          <span className="text-sm text-emerald-400">
+            Saved and logged to the audit trail
+          </span>
+        )}
+      </div>
+    </form>
   );
 }
 

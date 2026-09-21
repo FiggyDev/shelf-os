@@ -1,8 +1,10 @@
+import { importMenu } from "./actions";
 import { ChatMenuImporter } from "./importer";
 
 export const dynamic = "force-dynamic";
 
-export default function ImportPage() {
+export default async function ImportPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   return (
     <div className="p-6 lg:p-10">
       <header className="mb-8">
@@ -14,7 +16,7 @@ export default function ImportPage() {
           catalog.
         </p>
       </header>
-      <ChatMenuImporter />
+      <ChatMenuImporter brandSlug={slug} importAction={importMenu} />
     </div>
   );
 }
