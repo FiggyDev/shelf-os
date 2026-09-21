@@ -1,9 +1,17 @@
 name: Shelf review
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main, codex/shelf-inventory-race-review, codex/shelf-stale-edit-review, codex/shelf-browser-review, codex/shelf-import-browser-review, codex/shelf-webkit-review, codex/shelf-firefox-review, codex/shelf-dependency-review, codex/shelf-import-recovery, codex/shelf-staff-disclosure-review]
+    branches: [main]
+  # Validate stacked review PRs as well as PRs targeting the default branch.
+  pull_request:
+  workflow_dispatch:
+
+# Only superseded PR revisions cancel each other. Default/manual runs remain
+# independent so the actual integrated commit retains its own verification.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 jobs:
